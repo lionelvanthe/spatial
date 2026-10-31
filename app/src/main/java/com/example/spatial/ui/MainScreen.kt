@@ -2,6 +2,7 @@ package com.example.spatial.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -141,6 +142,26 @@ fun MainScreen(viewModel: SpatialViewModel) {
     val isSensorEnabled by viewModel.isSensorEnabled.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
     val processProgress by viewModel.processProgress.collectAsState()
+    val isExporting by viewModel.isExporting.collectAsState()
+    val exportProgress by viewModel.exportProgress.collectAsState()
+    LaunchedEffect(viewModel) {
+        viewModel.exportEvents.collect { event ->
+            when (event) {
+                is ExportEvent.Saved ->
+                    Toast.makeText(context, "Saved video: ${event.location}", Toast.LENGTH_LONG).show()
+                is ExportEvent.Failed ->
+                    Toast.makeText(context, "Export failed: ${event.message}", Toast.LENGTH_LONG).show()
+                is ExportEvent.Share -> {
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "video/mp4"
+                        putExtra(Intent.EXTRA_STREAM, event.uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(Intent.createChooser(send, "Share 3D video"))
+                }
+            }
+        }
+    }
 
     var screenMode by remember { mutableStateOf(ScreenMode.GALLERY) }
     var galleryTab by remember { mutableIntStateOf(0) } // 0: My photos, 1: Sample scenes
@@ -355,15 +376,52 @@ fun MainScreen(viewModel: SpatialViewModel) {
                     surfaceViewRef.value?.renderer?.resetTouchState()
                 },
                 onSetWallpaper = { viewModel.launchSetLiveWallpaperIntent() },
-                onShare = {
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_SUBJECT, "Photos 3D: " + (currentScene?.title ?: "Spatial Scene"))
-                        putExtra(Intent.EXTRA_TEXT, "Experience 3D Spatial Photos with real depth on your phone!")
-                    }
-                    context.startActivity(Intent.createChooser(shareIntent, "Share 3D Scene"))
-                }
+                onSave = { viewModel.exportVideo(share = false) },
+                onShare = { viewModel.exportVideo(share = true) }
             )
+        }
+
+        if (isExporting) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.8f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {},
+                contentAlignment = Alignment.Center
+            ) {
+                Card(
+                    modifier = Modifier.padding(32.dp),
+                    shape = RoundedCornerShape(22.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1B1D2C))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(28.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Rendering 3D video...",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 17.sp
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LinearProgressIndicator(
+                            progress = { exportProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = Color(0xFF00E5FF),
+                            trackColor = Color.White.copy(alpha = 0.15f),
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Button(onClick = { viewModel.cancelExport() }) { Text("Cancel") }
+                    }
+                }
+            }
         }
 
         // Depth Estimation / Processing Overlay
@@ -821,6 +879,7 @@ fun ViewerScreen(
     onUpdateInverted: (Boolean) -> Unit,
     onReset: () -> Unit,
     onSetWallpaper: () -> Unit,
+    onSave: () -> Unit,
     onShare: () -> Unit
 ) {
     Box(
@@ -871,7 +930,7 @@ fun ViewerScreen(
 
                     // Download / Save (Shown ONLY in Tab 2 Animations)
                     if (selectedBottomTab == 2) {
-                        IconButton(onClick = onReset) {
+                        IconButton(onClick = onSave) {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_save_real),
                                 contentDescription = "Save",

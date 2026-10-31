@@ -13,7 +13,6 @@ import java.util.concurrent.atomic.AtomicReference
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import kotlin.math.cos
-import kotlin.math.sin
 
 class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // A flat quad; all depth intersection is resolved per pixel in ParallaxShaders.
@@ -107,6 +106,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var viewWidth = 1
     private var viewHeight = 1
     private var lastFrameTime = 0L
+    private val patternSample = FloatArray(3)
     fun onTouchDown(x: Float, y: Float) {
         isTouching = true
     }
@@ -275,70 +275,15 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // effectiveZoom = (zoom < 0.0f) ? (zoom * 0.5f) : zoom
         val rawZoom = if (activeTabMode == 0 || activeTabMode == 2) sceneConfig.zoom.coerceIn(-1.0f, 1.0f) else 0.0f
         val effectiveZoom = if (rawZoom < 0.0f) rawZoom * 0.5f else rawZoom
-        var animX = 0.0f
-        var animY = 0.0f
         var animZ = if (activeTabMode == 2) {
             (1.0f - cos(cycle)) * effectiveZoom * 0.1f
         } else {
             0.0f
         }
-        when (sceneConfig.patternId.lowercase()) {
-            "horizontal" -> {
-                animX = sin(cycle) * animIntensity
-            }
-            "vertical" -> {
-                animY = sin(cycle) * animIntensity
-            }
-            "circular_cw", "circle_cw", "circle" -> {
-                animX = cos(cycle) * animIntensity
-                animY = sin(cycle) * animIntensity
-            }
-            "circular_ccw", "circle_ccw" -> {
-                animX = -cos(cycle) * animIntensity
-                animY = sin(cycle) * animIntensity
-            }
-            "eight_horizontal" -> {
-                animX = sin(cycle) * animIntensity
-                animY = sin(cycle * 2.0f) * 0.45f * animIntensity
-            }
-            "eight_vertical" -> {
-                animX = sin(cycle * 2.0f) * 0.45f * animIntensity
-                animY = sin(cycle) * animIntensity
-            }
-            "diagonal_top_bottom" -> {
-                val d = sin(cycle) * animIntensity * 0.75f
-                animX = d
-                animY = d
-            }
-            "diagonal_bottom_top" -> {
-                val d = sin(cycle) * animIntensity * 0.75f
-                animX = d
-                animY = -d
-            }
-            "spiral_cw" -> {
-                val radius = (0.35f + 0.65f * ((cycle % (4.0f * Math.PI.toFloat())) / (4.0f * Math.PI.toFloat()))) * animIntensity
-                animX = cos(cycle) * radius
-                animY = sin(cycle) * radius
-            }
-            "half_circle_bottom" -> {
-                animX = cos(cycle) * animIntensity
-                animY = kotlin.math.abs(sin(cycle)) * animIntensity
-            }
-            "half_circle_top" -> {
-                animX = cos(cycle) * animIntensity
-                animY = -kotlin.math.abs(sin(cycle)) * animIntensity
-            }
-            "horizontal_rapid" -> {
-                animX = sin(cycle * 2.2f) * animIntensity
-            }
-            "vertical_rapid" -> {
-                animY = sin(cycle * 2.2f) * animIntensity
-            }
-            "zoom" -> {
-                animZ = sin(cycle) * 0.25f * animIntensity
-            }
-            // "none" -> purely driven by gyro and touch
-        }
+        MotionPattern.sample(sceneConfig.patternId, cycle, animIntensity, patternSample)
+        val animX = patternSample[0]
+        val animY = patternSample[1]
+        if (!patternSample[2].isNaN()) animZ = patternSample[2]
         // Invert factor
         val invertMult = if (sceneConfig.rInverted) -1.0f else 1.0f
         var targetTiltX: Float

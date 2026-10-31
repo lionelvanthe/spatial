@@ -3,26 +3,42 @@ package com.example.spatial.ui
 import android.app.Application
 import android.app.WallpaperManager
 import android.content.ComponentName
+import android.content.ContentValues
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
+import androidx.core.content.FileProvider
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.spatial.ai.DepthEstimationManager
 import com.example.spatial.data.AssetDataLoader
 import com.example.spatial.data.SpatialSceneConfig
 import com.example.spatial.data.SpatialSceneItem
+import com.example.spatial.gl.VideoExporter
 import com.example.spatial.wallpaper.SpatialWallpaperService
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+
+sealed interface ExportEvent {
+    data class Saved(val location: String) : ExportEvent
+    data class Share(val uri: Uri) : ExportEvent
+    data class Failed(val message: String) : ExportEvent
+}
 
 class SpatialViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -45,6 +61,17 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
 
     private val _processProgress = MutableStateFlow(0.0f)
     val processProgress: StateFlow<Float> = _processProgress.asStateFlow()
+
+    private val _isExporting = MutableStateFlow(false)
+    val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
+
+    private val _exportProgress = MutableStateFlow(0.0f)
+    val exportProgress: StateFlow<Float> = _exportProgress.asStateFlow()
+
+    private val _exportEvents = MutableSharedFlow<ExportEvent>(extraBufferCapacity = 4)
+    val exportEvents: SharedFlow<ExportEvent> = _exportEvents.asSharedFlow()
+
+    private var exportJob: Job? = null
 
     init {
         loadPresetScenes()
@@ -250,6 +277,87 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
         val y = (src.height - side) / 2
         val square = Bitmap.createBitmap(src, x, y, side, side)
         return Bitmap.createScaledBitmap(square, size, size, true)
+    }
+
+    /** Renders the current scene's animation to an MP4, then saves it to the gallery or shares it. */
+    fun exportVideo(share: Boolean) {
+        if (_isExporting.value) return
+        val scene = _currentScene.value
+        val image = scene?.fullImageBitmap
+        if (scene == null || image == null) {
+            _exportEvents.tryEmit(ExportEvent.Failed("No scene loaded"))
+            return
+        }
+        val config = _currentConfig.value
+        _isExporting.value = true
+        _exportProgress.value = 0f
+        exportJob = viewModelScope.launch {
+            val app = getApplication<Application>()
+            val file = File(app.cacheDir, "exports/spatial_${System.currentTimeMillis()}.mp4")
+            try {
+                withContext(Dispatchers.IO) { clearOldExports(File(app.cacheDir, "exports")) }
+                VideoExporter().export(
+                    image, scene.depthData, scene.depthWidth, scene.depthHeight, config, file
+                ) { _exportProgress.value = it }
+                if (share) {
+                    val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
+                    _exportEvents.tryEmit(ExportEvent.Share(uri))
+                } else {
+                    val where = withContext(Dispatchers.IO) { saveToGallery(file) }
+                    _exportEvents.tryEmit(ExportEvent.Saved(where))
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("SpatialViewModel", "Video export failed", e)
+                _exportEvents.tryEmit(ExportEvent.Failed(e.message ?: "Export failed"))
+            } finally {
+                _isExporting.value = false
+                _exportProgress.value = 0f
+            }
+        }
+    }
+
+    fun cancelExport() {
+        exportJob?.cancel()
+    }
+
+    private fun clearOldExports(dir: File) {
+        dir.listFiles()?.forEach { it.delete() }
+    }
+
+    /** Copies [file] into the gallery (Movies/Spatial) and returns a user-readable location. */
+    private fun saveToGallery(file: File): String {
+        val app = getApplication<Application>()
+        val name = file.name
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, name)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/Spatial")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            val resolver = app.contentResolver
+            val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("Could not create gallery entry")
+            try {
+                resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                    ?: error("Could not open gallery entry")
+                values.clear()
+                values.put(MediaStore.Video.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
+            return "Movies/Spatial/$name"
+        }
+        // Before Android 10 a public-folder write needs a runtime permission; keep it app-scoped.
+        val dir = app.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: error("No storage available")
+        dir.mkdirs()
+        val target = File(dir, name)
+        file.copyTo(target, overwrite = true)
+        return target.absolutePath
     }
 
     fun launchSetLiveWallpaperIntent() {
