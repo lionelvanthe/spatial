@@ -71,8 +71,9 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile
     var activeTabMode = 0
     // true = whole photo visible (editor/viewer); false = edge-to-edge crop (wallpaper)
-    @Volatile
-    var fitImage = false
+    var fitImage: Boolean
+        get() = sceneConfig.imageFitMode == com.example.spatial.data.ImageFitMode.FIT
+        set(value) { sceneConfig = sceneConfig.copy(imageFitMode = if (value) com.example.spatial.data.ImageFitMode.FIT else com.example.spatial.data.ImageFitMode.FILL) }
     // Sensor inputs (from Gyroscope / Accelerometer)
     @Volatile
     var gyroX = 0.0f
@@ -154,24 +155,22 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         needsDepthReload = true
     }
 
-    private fun buildLayers(bitmap: Bitmap, depth: ByteArray?): Array<Bitmap?>? {
+    private fun buildLayers(bitmap: Bitmap, depth: ByteArray?): LayerBuilder.LayerData? {
         if (depth == null || depth.size != currentDepthWidth * currentDepthHeight) return null
         val pixels = IntArray(bitmap.width * bitmap.height)
         bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        val layerData = LayerBuilder.buildLayers(pixels, bitmap.width, bitmap.height, depth, currentDepthWidth, currentDepthHeight)
-            ?: return null
-        return Array(2) { index ->
-            Bitmap.createBitmap(layerData.layers[index], bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
-        }
+        return LayerBuilder.buildLayers(pixels, bitmap.width, bitmap.height, depth, currentDepthWidth, currentDepthHeight)
     }
 
-    private fun createDepthBitmap(depth: ByteArray?, width: Int, height: Int): Bitmap {
+    private fun createDepthBitmap(depth: ByteArray?, width: Int, height: Int, packed: IntArray?): Bitmap {
         val safeWidth = width.coerceAtLeast(1)
         val safeHeight = height.coerceAtLeast(1)
-        val pixels = IntArray(safeWidth * safeHeight)
-        for (i in pixels.indices) {
-            val value = depth?.getOrNull(i)?.toInt()?.and(0xFF) ?: 0
-            pixels[i] = 0xFF000000.toInt() or (value shl 16) or (value shl 8) or value
+        val pixels = packed ?: IntArray(safeWidth * safeHeight)
+        if (packed == null) {
+            for (i in pixels.indices) {
+                val value = depth?.getOrNull(i)?.toInt()?.and(0xFF) ?: 0
+                pixels[i] = 0xFF000000.toInt() or (value shl 16) or (value shl 8) or value
+            }
         }
         return Bitmap.createBitmap(pixels, safeWidth, safeHeight, Bitmap.Config.ARGB_8888)
     }
@@ -246,12 +245,14 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0])
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[1])
-            val depthBitmap = createDepthBitmap(currentDepthMap, currentDepthWidth, currentDepthHeight)
+            val layers = buildLayers(bmp, currentDepthMap)
+            hasSeparatedLayers = layers != null
+            val depthBitmap = createDepthBitmap(currentDepthMap, currentDepthWidth, currentDepthHeight, layers?.depthTexture)
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, depthBitmap, 0)
             depthBitmap.recycle()
-            val layers = buildLayers(bmp, currentDepthMap)
-            val inpaint = layers?.get(0) ?: bmp
-            val foregroundMask = layers?.get(1) ?: createOpaqueMask(bmp.width, bmp.height)
+            val inpaint = layers?.let { Bitmap.createBitmap(it.layers[0], bmp.width, bmp.height, Bitmap.Config.ARGB_8888) } ?: bmp
+            val foregroundMask = layers?.let { Bitmap.createBitmap(it.layers[1], bmp.width, bmp.height, Bitmap.Config.ARGB_8888) }
+                ?: createOpaqueMask(bmp.width, bmp.height)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[2])
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, inpaint, 0)
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[3])
@@ -408,12 +409,15 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             zoom3D = 0.0f
         )
         GLES20.glUseProgram(programHandle)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(programHandle, "uLayered"), if (hasSeparatedLayers) 1f else 0f)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0])
         GLES20.glUniform1i(uSamplerHandle, 0)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[1])
         GLES20.glUniform1i(uDepthSamplerHandle, 1)
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(programHandle, "uDepthTexel"),
+            1f / currentDepthWidth.coerceAtLeast(1), 1f / currentDepthHeight.coerceAtLeast(1))
         GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[2])
         GLES20.glUniform1i(uInpaintSamplerHandle, 2)
@@ -427,7 +431,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glUniform1f(uImageAspectHandle, imageAspect)
         GLES20.glUniform4f(uBgColorHandle, 0.06f, 0.06f, 0.09f, 1.0f)
         GLES20.glUniform1f(uScaleTypeHandle, if (fitImage) 0.0f else 1.0f)
-        GLES20.glUniform1f(uFillHandle, if (fitImage) FIT_FILL else 1.12f)
+        GLES20.glUniform1f(uFillHandle, if (sceneConfig.imageFitMode == com.example.spatial.data.ImageFitMode.FILL) 1f else FIT_FILL)
         GLES20.glUniform1f(uZoomHandle, zoomScale)
         GLES20.glUniform2f(uPanHandle, if (activeTabMode == 3) touchDragX * 0.25f else 0.0f, if (activeTabMode == 3) touchDragY * 0.25f else 0.0f)
         GLES20.glUniform1f(uZoom3DHandle, effectiveZoom3D)

@@ -97,4 +97,41 @@ class LayerBuilderTest {
         }
         assertEquals(0, redish)
     }
+
+    @Test fun extendedDepthFieldsDoNotContainTheOppositeSurface() {
+        val (px, depth) = scene()
+        val data = LayerBuilder.buildLayers(px, w, h, depth, dw, dh)!!
+        for (i in depth.indices) {
+            assertEquals(depth[i].toInt() and 255, (data.depthTexture[i] shr 16) and 255)
+            assertEquals(25, (data.depthTexture[i] shr 8) and 255)
+            assertEquals(230, data.depthTexture[i] and 255)
+        }
+    }
+
+    @Test fun reconstructionBlendsSeedsAndPreservesKnownPixels() {
+        val width = 33; val height = 9
+        val valid = BooleanArray(width * height) { it % width < 4 || it % width >= 29 }
+        val pixels = IntArray(valid.size) { if (it % width < 4) 0xFF0000FF.toInt() else if (it % width >= 29) 0xFF00FF00.toInt() else 0xFFFF0000.toInt() }
+        val result = LayerBuilder.pushPull(pixels, valid, width, height)
+        for (i in valid.indices) if (valid[i]) assertEquals(pixels[i], result[i])
+        val center = result[4 * width + 16]
+        assertEquals(0, (center shr 16) and 255)
+        assertTrue(((center shr 8) and 255) in 1..254)
+        assertTrue((center and 255) in 1..254)
+    }
+
+    @Test fun nearFieldExtendsInteriorAcrossContourRampButRetainsSurfaceVariation() {
+        val (px, depth) = scene()
+        for (y in 0 until h) for (x in 0 until w) {
+            if ((depth[y * w + x].toInt() and 255) == 230) {
+                depth[y * w + x] = (180 + x - 28).toByte()
+            }
+        }
+        depth[48 * w + 29] = 125
+        val packed = LayerBuilder.buildLayers(px, w, h, depth, dw, dh)!!.depthTexture
+        assertTrue("Contour ramp must not be retained as a near surface", (packed[48 * w + 29] and 255) > 170)
+        for (x in 40..56) {
+            assertEquals("Interior depth must remain continuous", depth[48 * w + x].toInt() and 255, packed[48 * w + x] and 255)
+        }
+    }
 }

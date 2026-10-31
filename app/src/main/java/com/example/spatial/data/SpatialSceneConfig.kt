@@ -2,6 +2,15 @@ package com.example.spatial.data
 
 import org.json.JSONObject
 
+enum class ImageFitMode(val shaderValue: Float, val label: String) {
+    FIT(0f, "Fit"), FILL(1f, "Fill"), BLURRED_BACKGROUND(2f, "Blurred background");
+
+    companion object {
+        fun parse(value: String): ImageFitMode = if (value.equals("CENTER_CROP", true)) FILL
+            else entries.firstOrNull { it.name.equals(value, true) } ?: FILL
+    }
+}
+
 /**
  * Data model for 3D spatial scene parameters matching _desc.dat
  */
@@ -31,7 +40,9 @@ data class SpatialSceneConfig(
     val brightness: Float = 1.0f,
     val sepia: Float = 0.0f,            // brown tint (0.0 to 1.0)
     val isometric: Float = 1.0f,        // 1 = parallel view rays (flat), 0 = full perspective
-    val dolly: Float = 0.0f             // camera push (+) in / pull (-) out, magnifying near layers
+    val dolly: Float = 0.0f,            // camera push (+) in / pull (-) out, magnifying near layers
+    val imageFitMode: ImageFitMode = ImageFitMode.FILL,
+    val backgroundColor: Int = 0xFF0F0F17.toInt()
 ) {
     fun sanitized(): SpatialSceneConfig = copy(
         intensity = intensity.finiteOr(MotionLimits.DEFAULT_INTENSITY).coerceIn(0f, MotionLimits.MAX_INTENSITY),
@@ -71,6 +82,8 @@ data class SpatialSceneConfig(
         obj.put("sepia", sepia.toDouble())
         obj.put("isometric", isometric.toDouble())
         obj.put("dolly", dolly.toDouble())
+        obj.put("imageFitMode", imageFitMode.name)
+        obj.put("backgroundColor", backgroundColor)
         return obj.toString()
     }
 
@@ -96,7 +109,9 @@ data class SpatialSceneConfig(
                     brightness = obj.optDouble("brightness", 1.0).toFloat(),
                     sepia = obj.optDouble("sepia", 0.0).toFloat(),
                     isometric = obj.optDouble("isometric", 1.0).toFloat(),
-                    dolly = obj.optDouble("dolly", 0.0).toFloat()
+                    dolly = obj.optDouble("dolly", 0.0).toFloat(),
+                    imageFitMode = ImageFitMode.parse(obj.optString("imageFitMode", "FILL")),
+                    backgroundColor = obj.optInt("backgroundColor", 0xFF0F0F17.toInt())
                 ).sanitized()
             } catch (e: Exception) {
                 SpatialSceneConfig()

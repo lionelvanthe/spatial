@@ -213,6 +213,9 @@ class VideoExporter {
             .also { check(it != 0) { "Parallax shader failed to build" } }
         private val textures = IntArray(4)
         private val imageAspect = image.width.toFloat() / image.height
+        private val depthTexelX = 1f / depthWidth.coerceAtLeast(1)
+        private val depthTexelY = 1f / depthHeight.coerceAtLeast(1)
+        private val separated: Boolean
         private val sample = FloatArray(3)
         private val quad: ByteBuffer = ByteBuffer.allocateDirect(QUAD.size * 4).order(ByteOrder.nativeOrder()).also {
             it.asFloatBuffer().put(QUAD)
@@ -221,9 +224,11 @@ class VideoExporter {
         init {
             GLES20.glGenTextures(textures.size, textures, 0)
             val layers = buildLayers(image, depth, depthWidth, depthHeight)
-            val depthBitmap = depthBitmap(depth, depthWidth, depthHeight)
-            val inpaint = layers?.get(0) ?: image
-            val mask = layers?.get(1) ?: opaqueMask(image.width, image.height)
+            separated = layers != null
+            val depthBitmap = depthBitmap(depth, depthWidth, depthHeight, layers?.depthTexture)
+            val inpaint = layers?.let { Bitmap.createBitmap(it.layers[0], image.width, image.height, Bitmap.Config.ARGB_8888) } ?: image
+            val mask = layers?.let { Bitmap.createBitmap(it.layers[1], image.width, image.height, Bitmap.Config.ARGB_8888) }
+                ?: opaqueMask(image.width, image.height)
             upload(0, image)
             upload(1, depthBitmap)
             upload(2, inpaint)
@@ -238,6 +243,7 @@ class VideoExporter {
             GLES20.glClearColor(0.06f, 0.06f, 0.09f, 1.0f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
             GLES20.glUseProgram(program)
+            GLES20.glUniform1f(loc("uLayered"), if (separated) 1f else 0f)
 
             val animIntensity = 0.65f * (0.4f + 0.7f * config.intensity)
             MotionPattern.sample(patternId, cycle, animIntensity, sample)
@@ -252,6 +258,7 @@ class VideoExporter {
             }
             uniform1i("image", 0)
             uniform1i("uDepthMap", 1)
+            GLES20.glUniform2f(loc("uDepthTexel"), depthTexelX, depthTexelY)
             uniform1i("uInpaint", 2)
             uniform1i("uForegroundMask", 3)
             GLES20.glUniform2f(loc("uOffset"), sample[0].coerceIn(-1f, 1f), sample[1].coerceIn(-1f, 1f))
@@ -262,7 +269,7 @@ class VideoExporter {
             GLES20.glUniform1f(loc("uImageAspect"), imageAspect)
             GLES20.glUniform4f(loc("uBgColor"), 0.06f, 0.06f, 0.09f, 1.0f)
             GLES20.glUniform1f(loc("uScaleType"), 1.0f)
-            GLES20.glUniform1f(loc("uFill"), FILL)
+            GLES20.glUniform1f(loc("uFill"), if (config.imageFitMode == com.example.spatial.data.ImageFitMode.FILL) FILL else .88f)
             GLES20.glUniform1f(loc("uZoom"), zoomScale)
             GLES20.glUniform2f(loc("uPan"), 0f, 0f)
             GLES20.glUniform1f(loc("uZoom3D"), zoom3D)
@@ -294,18 +301,17 @@ class VideoExporter {
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
         }
 
-        private fun buildLayers(image: Bitmap, depth: ByteArray?, dw: Int, dh: Int): Array<Bitmap>? {
+        private fun buildLayers(image: Bitmap, depth: ByteArray?, dw: Int, dh: Int): LayerBuilder.LayerData? {
             if (depth == null || depth.size != dw * dh) return null
             val pixels = IntArray(image.width * image.height)
             image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
-            val data = LayerBuilder.buildLayers(pixels, image.width, image.height, depth, dw, dh) ?: return null
-            return Array(2) { Bitmap.createBitmap(data.layers[it], image.width, image.height, Bitmap.Config.ARGB_8888) }
+            return LayerBuilder.buildLayers(pixels, image.width, image.height, depth, dw, dh)
         }
 
-        private fun depthBitmap(depth: ByteArray?, w: Int, h: Int): Bitmap {
+        private fun depthBitmap(depth: ByteArray?, w: Int, h: Int, packed: IntArray?): Bitmap {
             val sw = w.coerceAtLeast(1)
             val sh = h.coerceAtLeast(1)
-            val pixels = IntArray(sw * sh) {
+            val pixels = packed ?: IntArray(sw * sh) {
                 val v = depth?.getOrNull(it)?.toInt()?.and(0xFF) ?: 0
                 0xFF000000.toInt() or (v shl 16) or (v shl 8) or v
             }
@@ -320,8 +326,8 @@ class VideoExporter {
         const val EGL_RECORDABLE_ANDROID = 0x3142
         const val MAX_SIDE = 1080
         const val MAX_IDLE_ROUNDS = 500
-        // The wallpaper's overscan, so the moving photo never reveals the background colour.
-        const val FILL = 1.12f
+        // Exact center crop; the shader bounds the ray instead of relying on hidden overscan.
+        const val FILL = 1.0f
         // x, y, u, v; v = 0 is the top edge, as in the live mesh.
         val QUAD = floatArrayOf(
             -1f, 1f, 0f, 0f,

@@ -1,6 +1,8 @@
 package com.example.spatial.ai
 
 import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OnnxJavaType
+import ai.onnxruntime.TensorInfo
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
@@ -13,15 +15,11 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.FloatBuffer
 import java.util.Collections
 import kotlin.math.hypot
-import kotlin.math.max
-import kotlin.math.min
 
 /**
- * Depth Estimation Manager supporting Depth-Anything-V2 ONNX model
- * with high-performance heuristic fallback.
+ * Runs the bundled UINT8 RGB/NHWC depth model, with a heuristic fallback on inference failure.
  */
 class DepthEstimationManager(private val context: Context) {
 
@@ -33,11 +31,13 @@ class DepthEstimationManager(private val context: Context) {
         if (isModelLoaded) return@withContext
         try {
             ortEnvironment = OrtEnvironment.getEnvironment()
-            val modelPath = copyAssetToInternalStorage("d_models/model_256.onnx", "model_256.onnx")
+            // A distinct cache key prevents older FLOAT/NCHW models surviving an app update.
+            val modelPath = copyAssetToInternalStorage("d_models/model_256.onnx", "model_256_uint8_nhwc_v1.onnx")
             if (modelPath != null && File(modelPath).exists()) {
-                val opts = OrtSession.SessionOptions()
-                ortSession = ortEnvironment?.createSession(modelPath, opts)
-                isModelLoaded = true
+                OrtSession.SessionOptions().use { opts ->
+                    ortSession = ortEnvironment?.createSession(modelPath, opts)
+                }
+                isModelLoaded = ortSession != null
                 Log.d(TAG, "ONNX model_256.onnx loaded successfully")
             }
         } catch (e: Throwable) {
@@ -95,79 +95,39 @@ class DepthEstimationManager(private val context: Context) {
         val session = ortSession ?: return null
         val env = ortEnvironment ?: return null
 
-        val inputSize = 256
-        val scaled = Bitmap.createScaledBitmap(bitmap, inputSize, inputSize, true)
-
-        // Preprocess input tensor: float[1, 3, 256, 256] or float[1, 256, 256, 3]
-        val inputNames = session.inputNames
-        val inputName = inputNames.firstOrNull() ?: "pre-preop-input"
-
-        // Prepare FloatBuffer RGB normalized [0..1]
-        val floatBuf = ByteBuffer.allocateDirect(1 * 3 * inputSize * inputSize * 4)
-            .order(ByteOrder.nativeOrder())
-            .asFloatBuffer()
-
-        val pixels = IntArray(inputSize * inputSize)
-        scaled.getPixels(pixels, 0, inputSize, 0, 0, inputSize, inputSize)
-
-        // Channel-first (B, C, H, W)
-        for (c in 0..2) {
-            for (p in pixels) {
-                val v = when (c) {
-                    0 -> Color.red(p) / 255.0f
-                    1 -> Color.green(p) / 255.0f
-                    else -> Color.blue(p) / 255.0f
-                }
-                floatBuf.put(v)
+        val input = session.inputInfo.entries.single()
+        val info = input.value.info as? TensorInfo ?: error("Depth input must be a tensor")
+        require(info.type == OnnxJavaType.UINT8 && info.shape.contentEquals(longArrayOf(1, 256, 256, 3))) {
+            "Unsupported depth input: ${info.type} ${info.shape.contentToString()}"
+        }
+        // The bundled graph performs NHWC->NCHW, /255 and ImageNet normalization itself.
+        // Channel order is RGB, interleaved bytes, with no external normalization or inversion.
+        val scaled = Bitmap.createScaledBitmap(bitmap, 256, 256, true)
+        val pixels = IntArray(256 * 256)
+        try {
+            scaled.getPixels(pixels, 0, 256, 0, 0, 256, 256)
+        } finally {
+            if (scaled !== bitmap) scaled.recycle()
+        }
+        val bytes = DepthPreprocess.rgbNhwc(pixels)
+        val buffer = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder())
+        buffer.put(bytes).rewind()
+        OnnxTensor.createTensor(env, buffer, info.shape, OnnxJavaType.UINT8).use { tensor ->
+            session.run(Collections.singletonMap(input.key, tensor)).use { results ->
+                val output = results.get(0) as? OnnxTensor ?: error("Depth output must be a tensor")
+                val outputInfo = output.info
+                val shape = outputInfo.shape
+                require(outputInfo.type == OnnxJavaType.UINT8 && shape.size == 3 && shape[0] == 1L &&
+                    shape[1] > 0 && shape[2] > 0) { "Unsupported depth output: $outputInfo" }
+                val height = shape[1].toInt(); val width = shape[2].toInt()
+                val out = output.byteBuffer ?: error("Missing UINT8 depth buffer")
+                require(out.remaining() == width * height)
+                val values = ByteArray(out.remaining())
+                out.get(values)
+                // Output is already normalized to 0..255 by the graph; retain its polarity.
+                return DepthPreprocess.resizeBilinear(values, width, height, 504, 504)
             }
         }
-        floatBuf.rewind()
-
-        val tensor = OnnxTensor.createTensor(
-            env,
-            floatBuf,
-            longArrayOf(1, 3, inputSize.toLong(), inputSize.toLong())
-        )
-
-        val results = session.run(Collections.singletonMap(inputName, tensor))
-        val outputTensor = results.get(0) as? OnnxTensor
-        val outBuf = outputTensor?.floatBuffer
-
-        if (outBuf != null) {
-            val totalOut = outBuf.remaining()
-            val outVals = FloatArray(totalOut)
-            outBuf.get(outVals)
-
-            results.close()
-            tensor.close()
-
-            // Normalize output to 504x504 byte array
-            var minV = Float.MAX_VALUE
-            var maxV = Float.MIN_VALUE
-            for (v in outVals) {
-                if (v < minV) minV = v
-                if (v > maxV) maxV = v
-            }
-            val range = if (maxV - minV > 1e-5f) maxV - minV else 1.0f
-
-            val depthMap = ByteArray(504 * 504)
-            val side = kotlin.math.sqrt(totalOut.toDouble()).toInt()
-
-            for (y in 0 until 504) {
-                val sy = (y * side / 504).coerceIn(0, side - 1)
-                for (x in 0 until 504) {
-                    val sx = (x * side / 504).coerceIn(0, side - 1)
-                    val v = outVals[sy * side + sx]
-                    val norm = ((v - minV) / range * 255.0f).toInt().coerceIn(0, 255)
-                    depthMap[y * 504 + x] = norm.toByte()
-                }
-            }
-            return depthMap
-        }
-
-        results.close()
-        tensor.close()
-        return null
     }
 
     /**

@@ -38,12 +38,25 @@ object DepthPreprocess {
     }
 
     fun resizeBilinear(src: ByteArray, sw: Int, sh: Int, dw: Int, dh: Int): ByteArray {
-        require(src.size == sw * sh)
+        require(sw > 0 && sh > 0 && dw > 0 && dh > 0 && src.size == sw * sh)
         return ByteArray(dw * dh) { i ->
             val x = i % dw; val y = i / dw
-            val sx = (x.toFloat() * (sw - 1) / maxOf(1, dw - 1)).roundToInt().coerceIn(0, sw - 1)
-            val sy = (y.toFloat() * (sh - 1) / maxOf(1, dh - 1)).roundToInt().coerceIn(0, sh - 1)
-            src[sy * sw + sx]
+            val sx = ((x + .5f) * sw / dw - .5f).coerceIn(0f, (sw - 1).toFloat())
+            val sy = ((y + .5f) * sh / dh - .5f).coerceIn(0f, (sh - 1).toFloat())
+            val x0 = sx.toInt(); val y0 = sy.toInt()
+            val x1 = minOf(x0 + 1, sw - 1); val y1 = minOf(y0 + 1, sh - 1)
+            fun d(xx: Int, yy: Int) = src[yy * sw + xx].toInt() and 255
+            val fx = sx - x0; val fy = sy - y0
+            ((d(x0, y0) * (1 - fx) + d(x1, y0) * fx) * (1 - fy) +
+                (d(x0, y1) * (1 - fx) + d(x1, y1) * fx) * fy).roundToInt().coerceIn(0, 255).toByte()
+        }
+    }
+
+    fun rgbNhwc(pixels: IntArray): ByteArray = ByteArray(pixels.size * 3).also { bytes ->
+        pixels.forEachIndexed { i, pixel ->
+            bytes[i * 3] = (pixel shr 16).toByte()
+            bytes[i * 3 + 1] = (pixel shr 8).toByte()
+            bytes[i * 3 + 2] = pixel.toByte()
         }
     }
 

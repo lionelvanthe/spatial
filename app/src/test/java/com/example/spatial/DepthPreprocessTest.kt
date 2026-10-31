@@ -7,6 +7,18 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DepthPreprocessTest {
+    @Test fun inputBytesAreInterleavedRgbWithoutNormalization() {
+        val packed = DepthPreprocess.rgbNhwc(intArrayOf(0xFFFF0000.toInt(), 0xFF00FF00.toInt(), 0xFF0000FF.toInt(), 0xFF123456.toInt()))
+        assertArrayEquals(byteArrayOf(-1, 0, 0, 0, -1, 0, 0, 0, -1, 0x12, 0x34, 0x56), packed)
+    }
+
+    @Test fun bilinearResizeInterpolatesUnsignedDepthInBothAxes() {
+        val out = DepthPreprocess.resizeBilinear(byteArrayOf(0, 100, 100, 200.toByte()), 2, 2, 3, 3)
+        assertEquals(100, out[4].toInt() and 255)
+        assertEquals(50, out[1].toInt() and 255)
+        assertEquals(0, out[0].toInt() and 255)
+        assertEquals(200, out[8].toInt() and 255)
+    }
     @Test fun portraitIsLetterboxedNotStretched() {
         val b = DepthPreprocess.letterbox(1000, 2000, 256)
         assertEquals(128, b.width)
