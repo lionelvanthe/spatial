@@ -1233,6 +1233,8 @@ fun ViewerScreen(
                                 thickness = 0.8.dp,
                                 color = Color.White.copy(alpha = 0.15f)
                             )
+                            LookSlider("Isometric", config.isometric, 0f..1f) { v -> onUpdateConfig { it.copy(isometric = v) } }
+                            LookSlider("Dolly", config.dolly, -1f..1f) { v -> onUpdateConfig { it.copy(dolly = v) } }
                             LookSlider("Blur", config.blur, 0f..1f) { v -> onUpdateConfig { it.copy(blur = v) } }
                             LookSlider("Vignette", config.vignette, 0f..1f) { v -> onUpdateConfig { it.copy(vignette = v) } }
                             LookSlider("Saturation", config.saturation, 0f..2f) { v -> onUpdateConfig { it.copy(saturation = v) } }

@@ -20,6 +20,7 @@ internal object ParallaxShaders {
             GLES20.glGetUniformLocation(program, "uColor"),
             config.saturation, config.contrast, config.brightness, config.sepia
         )
+        GLES20.glUniform2f(GLES20.glGetUniformLocation(program, "uCamera"), 1.0f - config.isometric, config.dolly)
     }
 
     const val VERTEX = """
@@ -53,10 +54,13 @@ internal object ParallaxShaders {
         uniform float uBlur;         // depth-of-field strength, 0 = off
         uniform float uVignette;     // edge darkening, 0 = off
         uniform vec4 uColor;         // saturation, contrast, brightness, sepia
+        uniform vec2 uCamera;        // perspective (1 - isometric), dolly
         varying vec2 v_TexCoord;
 
         // Fixed loop bounds keep this valid on GLES 2 while providing a stable intersection.
         const int STEPS = 32;
+        const float PERSPECTIVE = 0.25;
+        const float DOLLY = 0.2;
 
         // The ray-marched foreground composed over the pre-filled background.
         vec4 compose(vec2 uv) {
@@ -86,6 +90,12 @@ internal object ParallaxShaders {
             if (uStrength > 0.0) {
                 // Equal tilt gives equal on-screen displacement on both axes (y scaled by the aspect).
                 vec2 parallax = vec2(uOffset.x, -uOffset.y * uImageAspect) * uDepthHeight * uStrength;
+                // Rays that diverge from a point (perspective, or a dollied camera) add an outward
+                // component that grows with the distance from the centre; parallel rays add none.
+                float spread = (uCamera.x * PERSPECTIVE + uCamera.y * DOLLY) * uStrength;
+                // Magnify slightly so the diverging rays never leave the photo and smear its edge.
+                uv = (uv - 0.5) / max(1.0 + spread * uNeutral, 1.0 - spread * (1.0 - uNeutral)) + 0.5;
+                parallax += (uv - 0.5) * spread;
                 float stepDepth = 1.0 / float(STEPS);
                 vec2 delta = parallax / float(STEPS);
                 vec2 currentUV = uv - parallax * (1.0 - uNeutral);

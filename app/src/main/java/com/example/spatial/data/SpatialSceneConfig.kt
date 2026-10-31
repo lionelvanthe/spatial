@@ -29,7 +29,9 @@ data class SpatialSceneConfig(
     val saturation: Float = 1.0f,       // 0 = grayscale, 1 = unchanged, 2 = vivid
     val contrast: Float = 1.0f,
     val brightness: Float = 1.0f,
-    val sepia: Float = 0.0f             // brown tint (0.0 to 1.0)
+    val sepia: Float = 0.0f,            // brown tint (0.0 to 1.0)
+    val isometric: Float = 1.0f,        // 1 = parallel view rays (flat), 0 = full perspective
+    val dolly: Float = 0.0f             // camera push (+) in / pull (-) out, magnifying near layers
 ) {
     fun sanitized(): SpatialSceneConfig = copy(
         intensity = intensity.finiteOr(MotionLimits.DEFAULT_INTENSITY).coerceIn(0f, MotionLimits.MAX_INTENSITY),
@@ -42,7 +44,9 @@ data class SpatialSceneConfig(
         saturation = saturation.finiteOr(1f).coerceIn(0f, 2f),
         contrast = contrast.finiteOr(1f).coerceIn(0f, 2f),
         brightness = brightness.finiteOr(1f).coerceIn(0f, 2f),
-        sepia = sepia.finiteOr(0f).coerceIn(0f, 1f)
+        sepia = sepia.finiteOr(0f).coerceIn(0f, 1f),
+        isometric = isometric.finiteOr(1f).coerceIn(0f, 1f),
+        dolly = dolly.finiteOr(0f).coerceIn(-1f, 1f)
     )
 
     private fun Float.finiteOr(default: Float) = if (isFinite()) this else default
@@ -65,6 +69,8 @@ data class SpatialSceneConfig(
         obj.put("contrast", contrast.toDouble())
         obj.put("brightness", brightness.toDouble())
         obj.put("sepia", sepia.toDouble())
+        obj.put("isometric", isometric.toDouble())
+        obj.put("dolly", dolly.toDouble())
         return obj.toString()
     }
 
@@ -88,7 +94,9 @@ data class SpatialSceneConfig(
                     saturation = obj.optDouble("saturation", 1.0).toFloat(),
                     contrast = obj.optDouble("contrast", 1.0).toFloat(),
                     brightness = obj.optDouble("brightness", 1.0).toFloat(),
-                    sepia = obj.optDouble("sepia", 0.0).toFloat()
+                    sepia = obj.optDouble("sepia", 0.0).toFloat(),
+                    isometric = obj.optDouble("isometric", 1.0).toFloat(),
+                    dolly = obj.optDouble("dolly", 0.0).toFloat()
                 ).sanitized()
             } catch (e: Exception) {
                 SpatialSceneConfig()

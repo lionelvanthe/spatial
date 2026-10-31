@@ -13,6 +13,14 @@ class LookConfigTest {
         assertEquals(1f, c.contrast, 0f)
         assertEquals(1f, c.brightness, 0f)
         assertEquals(0f, c.sepia, 0f)
+        assertEquals(1f, c.isometric, 0f)
+        assertEquals(0f, c.dolly, 0f)
+    }
+
+    @Test fun cameraValuesAreClamped() {
+        val c = SpatialSceneConfig(isometric = -3f, dolly = 9f).sanitized()
+        assertEquals(0f, c.isometric, 0f)
+        assertEquals(1f, c.dolly, 0f)
     }
 
     @Test fun lookValuesInsideTheRangeAreUntouched() {
