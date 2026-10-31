@@ -1,5 +1,8 @@
 package com.example.spatial.gl
 
+import android.opengl.GLES20
+import com.example.spatial.data.SpatialSceneConfig
+
 /**
  * Per-pixel "steep parallax" shaders (GLSL ES 1.00 so they run on GLES 2.0).
  *
@@ -9,6 +12,16 @@ package com.example.spatial.gl
  * and the plane at `uNeutral` stays put.
  */
 internal object ParallaxShaders {
+    /** Sets the look uniforms (blur, vignette, colour grade) of [program], which must be in use. */
+    fun applyEffects(program: Int, config: SpatialSceneConfig) {
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uBlur"), config.blur)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uVignette"), config.vignette)
+        GLES20.glUniform4f(
+            GLES20.glGetUniformLocation(program, "uColor"),
+            config.saturation, config.contrast, config.brightness, config.sepia
+        )
+    }
+
     const val VERTEX = """
         attribute vec4 position;
         attribute vec2 textureST;
@@ -37,10 +50,20 @@ internal object ParallaxShaders {
         uniform vec2 uPan;           // pan, in image widths / heights
         uniform float uZoom3D;       // how much near surfaces are magnified
         uniform float uStrength;     // 0 = show the untouched photo
+        uniform float uBlur;         // depth-of-field strength, 0 = off
+        uniform float uVignette;     // edge darkening, 0 = off
+        uniform vec4 uColor;         // saturation, contrast, brightness, sepia
         varying vec2 v_TexCoord;
 
         // Fixed loop bounds keep this valid on GLES 2 while providing a stable intersection.
         const int STEPS = 32;
+
+        // The ray-marched foreground composed over the pre-filled background.
+        vec4 compose(vec2 uv) {
+            vec4 foreground = texture2D(image, uv);
+            vec4 background = texture2D(uInpaint, uv);
+            return mix(background, foreground, texture2D(uForegroundMask, uv).a);
+        }
 
         void main() {
             float ratio = uAspectRatio / uImageAspect;
@@ -99,10 +122,40 @@ internal object ParallaxShaders {
             // The source photo cannot contain pixels hidden behind a foreground object.  Sampling
             // it directly at a newly exposed coordinate creates a bright copy of the silhouette.
             // Compose the ray-marched foreground over a pre-filled background instead.
-            vec4 foreground = texture2D(image, finalUV);
-            vec4 background = texture2D(uInpaint, finalUV);
-            float foregroundAlpha = texture2D(uForegroundMask, finalUV).a;
-            gl_FragColor = mix(background, foreground, foregroundAlpha);
+            vec4 color = compose(finalUV);
+
+            // Depth of field: blur grows with the distance from the neutral (in-focus) plane.
+            if (uBlur > 0.0) {
+                float away = abs(texture2D(uDepthMap, finalUV).r - uNeutral);
+                float radius = uBlur * smoothstep(0.0, 0.6, away) * 0.012;
+                if (radius > 0.0004) {
+                    vec2 stretch = vec2(1.0, uAspectRatio);
+                    vec4 sum = color;
+                    for (int i = 0; i < 8; i++) {
+                        float a = float(i) * 0.785398;
+                        vec2 dir = vec2(cos(a), sin(a)) * stretch;
+                        sum += compose(finalUV + dir * radius);
+                        sum += compose(finalUV + dir * radius * 0.5);
+                    }
+                    color = sum / 17.0;
+                }
+            }
+
+            // Colour grade.
+            vec3 rgb = color.rgb * uColor.z;
+            rgb = (rgb - 0.5) * uColor.y + 0.5;
+            float luma = dot(rgb, vec3(0.299, 0.587, 0.114));
+            rgb = mix(vec3(luma), rgb, uColor.x);
+            vec3 tint = vec3(dot(rgb, vec3(0.393, 0.769, 0.189)),
+                             dot(rgb, vec3(0.349, 0.686, 0.168)),
+                             dot(rgb, vec3(0.272, 0.534, 0.131)));
+            rgb = mix(rgb, tint, uColor.w);
+
+            // Vignette, measured on the screen so it hugs the frame whatever the zoom.
+            vec2 fromCentre = v_TexCoord - 0.5;
+            rgb *= 1.0 - uVignette * smoothstep(0.25, 0.75, length(fromCentre) * 1.2);
+
+            gl_FragColor = vec4(clamp(rgb, 0.0, 1.0), color.a);
         }
     """
 }

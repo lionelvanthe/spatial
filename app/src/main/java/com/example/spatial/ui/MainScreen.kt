@@ -371,6 +371,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 },
                 onUpdateZoom3D = { viewModel.updateZoom3D(it) },
                 onUpdateInverted = { viewModel.updateInverted(it) },
+                onUpdateConfig = { viewModel.updateConfig(it) },
                 onReset = {
                     viewModel.resetToDefault()
                     surfaceViewRef.value?.renderer?.resetTouchState()
@@ -851,6 +852,34 @@ fun CustomSpatialSlider(
     )
 }
 
+@Composable
+private fun LookSlider(
+    label: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    onChange: (Float) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "$label:",
+            color = Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.width(78.dp)
+        )
+        CustomSpatialSlider(
+            value = value,
+            onValueChange = onChange,
+            valueRange = range,
+            thinTrack = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
 /**
  * 3D Viewer & Studio Screen exactly replicating activity_image_view.xml from the Photos 3D sample app
  */
@@ -877,6 +906,7 @@ fun ViewerScreen(
     onUpdateZoom: (Float) -> Unit,
     onUpdateZoom3D: (Float) -> Unit,
     onUpdateInverted: (Boolean) -> Unit,
+    onUpdateConfig: ((SpatialSceneConfig) -> SpatialSceneConfig) -> Unit,
     onReset: () -> Unit,
     onSetWallpaper: () -> Unit,
     onSave: () -> Unit,
@@ -1192,6 +1222,23 @@ fun ViewerScreen(
                                     modifier = Modifier.fillMaxWidth()
                                 )
                             }
+                        }
+
+                        // LOOK: depth blur, vignette and colour grade (not part of the original app)
+                        if (selectedBottomTab == 0 || selectedBottomTab == 2) {
+                            HorizontalDivider(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                thickness = 0.8.dp,
+                                color = Color.White.copy(alpha = 0.15f)
+                            )
+                            LookSlider("Blur", config.blur, 0f..1f) { v -> onUpdateConfig { it.copy(blur = v) } }
+                            LookSlider("Vignette", config.vignette, 0f..1f) { v -> onUpdateConfig { it.copy(vignette = v) } }
+                            LookSlider("Saturation", config.saturation, 0f..2f) { v -> onUpdateConfig { it.copy(saturation = v) } }
+                            LookSlider("Contrast", config.contrast, 0f..2f) { v -> onUpdateConfig { it.copy(contrast = v) } }
+                            LookSlider("Brightness", config.brightness, 0f..2f) { v -> onUpdateConfig { it.copy(brightness = v) } }
+                            LookSlider("Sepia", config.sepia, 0f..1f) { v -> onUpdateConfig { it.copy(sepia = v) } }
                         }
                     }
                 }

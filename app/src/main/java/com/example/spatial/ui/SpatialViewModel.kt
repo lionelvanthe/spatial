@@ -193,6 +193,13 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
         persistConfigForWallpaper(newCfg)
     }
 
+    /** Applies [change] to the current config; used by the look (effects) sliders. */
+    fun updateConfig(change: (SpatialSceneConfig) -> SpatialSceneConfig) {
+        val newCfg = change(_currentConfig.value).sanitized()
+        _currentConfig.value = newCfg
+        persistConfigForWallpaper(newCfg)
+    }
+
     fun toggleSensor() {
         _isSensorEnabled.value = !_isSensorEnabled.value
     }

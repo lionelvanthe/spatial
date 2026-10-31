@@ -23,14 +23,26 @@ data class SpatialSceneConfig(
     val rInverted: Boolean = false,     // Invert gyro / motion
     val wallTargetX: Float = 0.5f,
     val wallTargetY: Float = 0.5f,
-    val patternId: String = "none"
+    val patternId: String = "none",
+    val vignette: Float = 0.0f,         // edge darkening (0.0 to 1.0)
+    val blur: Float = 0.0f,             // depth-of-field blur away from the neutral plane (0.0 to 1.0)
+    val saturation: Float = 1.0f,       // 0 = grayscale, 1 = unchanged, 2 = vivid
+    val contrast: Float = 1.0f,
+    val brightness: Float = 1.0f,
+    val sepia: Float = 0.0f             // brown tint (0.0 to 1.0)
 ) {
     fun sanitized(): SpatialSceneConfig = copy(
         intensity = intensity.finiteOr(MotionLimits.DEFAULT_INTENSITY).coerceIn(0f, MotionLimits.MAX_INTENSITY),
         depthCenter = depthCenter.finiteOr(0.5f).coerceIn(0f, 1f),
         speed = speed.finiteOr(0.35f).coerceIn(0f, 1f),
         zoom = zoom.finiteOr(0f).coerceIn(MotionLimits.MIN_ZOOM, MotionLimits.MAX_ZOOM),
-        zoom3D = zoom3D.finiteOr(0f).coerceIn(0f, MotionLimits.MAX_ZOOM_3D)
+        zoom3D = zoom3D.finiteOr(0f).coerceIn(0f, MotionLimits.MAX_ZOOM_3D),
+        vignette = vignette.finiteOr(0f).coerceIn(0f, 1f),
+        blur = blur.finiteOr(0f).coerceIn(0f, 1f),
+        saturation = saturation.finiteOr(1f).coerceIn(0f, 2f),
+        contrast = contrast.finiteOr(1f).coerceIn(0f, 2f),
+        brightness = brightness.finiteOr(1f).coerceIn(0f, 2f),
+        sepia = sepia.finiteOr(0f).coerceIn(0f, 1f)
     )
 
     private fun Float.finiteOr(default: Float) = if (isFinite()) this else default
@@ -47,6 +59,12 @@ data class SpatialSceneConfig(
         obj.put("wallTargetX", wallTargetX.toDouble())
         obj.put("wallTargetY", wallTargetY.toDouble())
         obj.put("patternId", patternId)
+        obj.put("vignette", vignette.toDouble())
+        obj.put("blur", blur.toDouble())
+        obj.put("saturation", saturation.toDouble())
+        obj.put("contrast", contrast.toDouble())
+        obj.put("brightness", brightness.toDouble())
+        obj.put("sepia", sepia.toDouble())
         return obj.toString()
     }
 
@@ -64,7 +82,13 @@ data class SpatialSceneConfig(
                     rInverted = obj.optBoolean("rInverted", false),
                     wallTargetX = obj.optDouble("wallTargetX", 0.5).toFloat(),
                     wallTargetY = obj.optDouble("wallTargetY", 0.5).toFloat(),
-                    patternId = obj.optString("patternId", "none")
+                    patternId = obj.optString("patternId", "none"),
+                    vignette = obj.optDouble("vignette", 0.0).toFloat(),
+                    blur = obj.optDouble("blur", 0.0).toFloat(),
+                    saturation = obj.optDouble("saturation", 1.0).toFloat(),
+                    contrast = obj.optDouble("contrast", 1.0).toFloat(),
+                    brightness = obj.optDouble("brightness", 1.0).toFloat(),
+                    sepia = obj.optDouble("sepia", 0.0).toFloat()
                 ).sanitized()
             } catch (e: Exception) {
                 SpatialSceneConfig()

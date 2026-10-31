@@ -432,6 +432,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glUniform2f(uPanHandle, if (activeTabMode == 3) touchDragX * 0.25f else 0.0f, if (activeTabMode == 3) touchDragY * 0.25f else 0.0f)
         GLES20.glUniform1f(uZoom3DHandle, effectiveZoom3D)
         GLES20.glUniform1f(uStrengthHandle, if (activeTabMode == 3) 0.0f else 1.0f)
+        ParallaxShaders.applyEffects(programHandle, sceneConfig)
         rayMarchMesh.draw(aPositionHandle, aTextureSTHandle)
     }
     companion object {

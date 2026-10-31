@@ -267,6 +267,7 @@ class VideoExporter {
             GLES20.glUniform2f(loc("uPan"), 0f, 0f)
             GLES20.glUniform1f(loc("uZoom3D"), zoom3D)
             GLES20.glUniform1f(loc("uStrength"), 1.0f)
+            ParallaxShaders.applyEffects(program, config)
 
             val pos = GLES20.glGetAttribLocation(program, "position")
             val st = GLES20.glGetAttribLocation(program, "textureST")
