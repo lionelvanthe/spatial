@@ -44,6 +44,23 @@
         "Ghi thiết bị, phiên bản Android và bằng chứng quan sát"
       ],
       "evidence": []
+    },
+    {
+      "id": "TABS-001",
+      "title": "Sửa hiển thị không đồng nhất giữa ba tab đầu của viewer",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Xác định phần hiển thị lệch và hành vi mong muốn giữa Shake, Rotate, Animations",
+        "Sửa nguyên nhân trong phạm vi ba tab, giữ hành vi riêng của từng chế độ",
+        "Chạy Verify và kiểm tra trực quan luồng chuyển ba tab trên thiết bị hoặc emulator"
+      ],
+      "evidence": [
+        "2026-11-01: Người dùng xác nhận cần đồng nhất khung ảnh và độ zoom của Shake, Rotate, Animations. Dùng chung zoom/zoom3D/depthCenter, giữ pinch zoom khi chuyển ba tab; giữ hiệu ứng chuyển động riêng.",
+        "2026-11-01: Init passed (20261101T094619507Z-f263653a). Verify bản cuối chạy 42 tests, 40 passed, 2 MotionLimitsTest failed có sẵn (20261101T094844494Z-32a6b420); lint/build bị fail-fast trong Verify.",
+        "2026-11-01: Chạy riêng :app:testDebugUnitTest --tests com.example.spatial.ViewerFramingTest :app:lintDebug :app:assembleDebug :app:connectedDebugAndroidTest: BUILD SUCCESSFUL; 4 test mới pass. Báo cáo app/build/reports/tests/testDebugUnitTest/, app/build/reports/lint-results-debug.html và app/build/reports/androidTests/connected/.",
+        "2026-11-01: Device passed trên Pixel_9_Pro AVD Android 16 (20261101T094703621Z-0931d436); instrumentation bản cuối cũng pass. Đối chiếu trực quan Cliffside Village với zoom/zoom3D khác 0: cùng khung ảnh khi chuyển ba tab, Animations vẫn chuyển động; ảnh .harness/tab-0.png, tab-1.png, tab-2.png. Chưa thao tác pinch đa điểm và chưa kiểm tra cảm biến máy thật."
+      ]
     }
   ]
 }

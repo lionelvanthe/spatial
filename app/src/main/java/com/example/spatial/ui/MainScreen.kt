@@ -347,10 +347,13 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 selectedBottomTab = selectedBottomTab,
                 showControls = showControls,
                 onSelectBottomTab = { index ->
+                    val previousTab = selectedBottomTab
                     selectedBottomTab = index
                     surfaceViewRef.value?.renderer?.let { r ->
                         r.activeTabMode = index
-                        r.resetTouchState()
+                        r.resetTouchState(
+                            preserveZoom = com.example.spatial.gl.ViewerFraming.preserveTouchZoom(previousTab, index)
+                        )
                     }
                 },
                 onToggleControls = { showControls = !showControls },

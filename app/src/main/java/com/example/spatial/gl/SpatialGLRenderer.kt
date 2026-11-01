@@ -130,10 +130,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         }
     }
     /**
-     * Resets touch zoom and drag offsets back to initial 1.0x centered identity state.
+     * Clears motion offsets; motion-tab switches can retain the current pinch zoom.
      */
-    fun resetTouchState() {
-        touchZoom = 0.0f
+    fun resetTouchState(preserveZoom: Boolean = false) {
+        if (!preserveZoom) touchZoom = 0.0f
         touchDragX = 0.0f
         touchDragY = 0.0f
         smoothTiltX = 0.0f
@@ -274,8 +274,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val animIntensity = 0.65f * (0.4f + 0.7f * sceneConfig.intensity.coerceIn(0.0f, 1.25f))
         // Native zoom -> shiftZ formula from performRotationalUpdate (0x141a8..0x141f0) & performAnimatedUpdate (0x1439c):
         // effectiveZoom = (zoom < 0.0f) ? (zoom * 0.5f) : zoom
-        val rawZoom = if (activeTabMode == 0 || activeTabMode == 2) sceneConfig.zoom.coerceIn(-1.0f, 1.0f) else 0.0f
-        val effectiveZoom = if (rawZoom < 0.0f) rawZoom * 0.5f else rawZoom
+        val effectiveZoom = ViewerFraming.effectiveZoom(sceneConfig.zoom, activeTabMode)
         var animZ = if (activeTabMode == 2) {
             (1.0f - cos(cycle)) * effectiveZoom * 0.1f
         } else {
@@ -383,21 +382,12 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // Camera distance (cameraZ) handles the dynamic 2D/3D zoom scaling.
         // When sliderZoom == 0f and touchZoom == 0f, zoomScale is strictly 1.0f,
         // positioning the camera at baseDistance (2.4f) and returning the quad to 100% exact initial size.
-        val sliderZoom = if (activeTabMode == 0 || activeTabMode == 2) effectiveZoom else 0.0f
+        val sliderZoom = effectiveZoom
         val zoomScale = (1.0f + sliderZoom * 0.6f + touchZoom).coerceIn(0.5f, 2.5f)
         val cameraZ = baseDistance / zoomScale
         // Update mesh vertices with exact distortion-free dimensions and native C++ parameter formulas
-        // Per rk0.p([F) lines 3515-3526: Mode 3 (Tab 2 Animations) inverts depthCenter -> (1.0f - depthCenter)
-        val effectiveDepthCenter = if (activeTabMode == 2) {
-            (1.0f - sceneConfig.depthCenter).coerceIn(0.0f, 1.0f)
-        } else {
-            sceneConfig.depthCenter.coerceIn(0.0f, 1.0f)
-        }
-        val effectiveZoom3D = if ((activeTabMode == 0 || activeTabMode == 2) && kotlin.math.abs(sceneConfig.zoom) >= 0.1f) {
-            sceneConfig.zoom3D.coerceIn(0.0f, 1.0f)
-        } else {
-            0.0f
-        }
+        val effectiveDepthCenter = ViewerFraming.depthCenter(sceneConfig.depthCenter)
+        val effectiveZoom3D = ViewerFraming.zoom3D(sceneConfig.zoom, sceneConfig.zoom3D, activeTabMode)
         // Flat clip-space rectangle for the ray-march shader.
         rayMarchMesh.setUniformDepth(0.0f)
         rayMarchMesh.updateMesh(
