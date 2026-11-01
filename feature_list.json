@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "HARNESS-001",
+      "title": "Harness Android có thể khởi tạo, kiểm tra và bàn giao",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "AGENTS.md dẫn tới hướng dẫn kỹ thuật và trạng thái hiện tại",
+        "Init kiểm tra cấu trúc và môi trường mà không cài đặt hoặc sửa cấu hình máy",
+        "Verify chạy unit tests, lint và assembleDebug, trả lỗi nếu một bước thất bại",
+        "Device không báo thành công khi không có đúng một thiết bị sẵn sàng",
+        "Có báo cáo cục bộ và hướng dẫn bàn giao, phân biệt kiểm tra tự động với thủ công"
+      ],
+      "evidence": [
+        "2026-11-01: Check passed; Init passed with Gradle 9.6.0 and configured Java 25 daemon criteria (run 20261101T094325992Z-254a5bc2).",
+        "2026-11-01: Verify invoked :app:testDebugUnitTest correctly, ran 38 tests, returned exit 1 on 2 MotionLimitsTest failures and did not continue to lint/build (run 20261101T094308876Z-08b17866). Full successful Verify remains unverified until baseline tests are fixed.",
+        "2026-11-01: Device returned exit 1 with error adb devices failed; no instrumentation was run (run 20261101T094335487Z-06e60c6a). Ready-device path remains unverified.",
+        "2026-11-01: git diff --check passed; instructions, test matrix, local JSON/log reports and handoff created."
+      ]
+    },
+    {
+      "id": "BASELINE-001",
+      "title": "Điều tra hai unit test MotionLimitsTest đang thất bại",
+      "status": "pending",
+      "depends_on": [],
+      "acceptance": [
+        "Đối chiếu expected behavior với SpatialSceneConfig và MotionLimits trước khi sửa",
+        "nonFiniteValuesFallBackToSafeDefaults và valuesInsideTheRangeAreUntouched pass với tiêu chí đúng",
+        "Chạy Verify thành công qua unit test, lint và assembleDebug"
+      ],
+      "evidence": []
+    },
+    {
+      "id": "WALLPAPER-001",
+      "title": "Xác minh live wallpaper trên máy thật",
+      "status": "pending",
+      "depends_on": [],
+      "acceptance": [
+        "Đặt wallpaper từ preview thành công",
+        "Ảnh và depth khớp với preview",
+        "Cảm biến và render dừng/tiếp tục đúng khi ẩn/hiện màn hình chính",
+        "Ghi thiết bị, phiên bản Android và bằng chứng quan sát"
+      ],
+      "evidence": []
+    }
+  ]
+}

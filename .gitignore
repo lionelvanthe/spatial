@@ -13,3 +13,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Local harness evidence and development caches
+/.harness/
+/.gradle-user/
+/.kotlin/
+/.shots/
+/.rea-analysis/
