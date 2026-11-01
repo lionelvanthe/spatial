@@ -76,20 +76,20 @@ internal object ParallaxShaders {
         }
 
         vec4 compose(vec2 foregroundUV, vec2 backgroundUV, float visible) {
-            vec4 foreground = texture2D(image, foregroundUV);
+            vec2 fUV = uScaleType < 0.5 ? clamp(foregroundUV, 0.0, 1.0) : foregroundUV;
+            vec2 bUV = uScaleType < 0.5 ? clamp(backgroundUV, 0.0, 1.0) : backgroundUV;
+            vec4 foreground = texture2D(image, fUV);
             vec4 background;
-            if (insidePhoto(backgroundUV) > 0.5) {
-                background = texture2D(uInpaint, backgroundUV);
+            if (insidePhoto(bUV) > 0.5) {
+                background = texture2D(uInpaint, bUV);
             } else {
                 background = uScaleType > 1.5 ? blurredBackdrop(v_TexCoord) : uBgColor;
             }
-            return mix(background, foreground,
-                texture2D(uForegroundMask, foregroundUV).a * visible * insidePhoto(foregroundUV));
-        }
-
-        float rayLimit(float origin, float travel) {
-            return travel > 0.0 ? (1.0 - origin) / max(travel, 0.000001)
-                                : origin / max(-travel, 0.000001);
+            float fgAlpha = texture2D(uForegroundMask, fUV).a * visible;
+            if (uScaleType >= 0.5) {
+                fgAlpha *= insidePhoto(foregroundUV);
+            }
+            return mix(background, foreground, fgAlpha);
         }
 
         vec2 projectDepth(vec2 uv, vec2 parallax, float depth) {
@@ -123,30 +123,25 @@ internal object ParallaxShaders {
                 // Magnify slightly so the diverging rays never leave the photo and smear its edge.
                 uv = (uv - 0.5) / max(1.0, max(1.0 + spread * uNeutral, 1.0 - spread * (1.0 - uNeutral))) + 0.5;
                 parallax += (uv - 0.5) * spread;
-                vec2 nearTravel = -parallax * (1.0 - uNeutral);
-                vec2 farTravel = parallax * uNeutral;
-                float limit = min(min(rayLimit(uv.x, nearTravel.x), rayLimit(uv.y, nearTravel.y)),
-                                  min(rayLimit(uv.x, farTravel.x), rayLimit(uv.y, farTravel.y)));
-                // Approaches the image border smoothly; hard clamping creates a repeated-texel strip.
-                limit = max(limit, 0.0);
-                parallax *= 1.0 - exp(-limit * limit);
+
                 // Independent inverse projection of the reconstructed far surface. Its depth
                 // contains no foreground, so revealing a hole supplies actual filled RGB data.
                 backgroundUV = uv;
                 for (int j = 0; j < 4; j++) {
-                    float farDepth = texture2D(uDepthMap, backgroundUV).g;
+                    float farDepth = texture2D(uDepthMap, clamp(backgroundUV, 0.0, 1.0)).g;
                     backgroundUV = projectDepth(uv, parallax, farDepth);
                 }
                 float stepDepth = 1.0 / float(STEPS);
                 vec2 currentUV = projectDepth(uv, parallax, 1.0);
                 float currentLayerDepth = 1.0;
                 bool intersected = false;
-                float previousSample = texture2D(uDepthMap, currentUV).b;
+                float previousSample = texture2D(uDepthMap, clamp(currentUV, 0.0, 1.0)).b;
                 float previousGap = 1.0 - previousSample;
                 finalUV = currentUV;
 
                 for (int i = 0; i <= STEPS; i++) {
-                    float depthMapVal = texture2D(uDepthMap, currentUV).b;
+                    vec2 sampleUV = clamp(currentUV, 0.0, 1.0);
+                    float depthMapVal = texture2D(uDepthMap, sampleUV).b;
                     float gap = currentLayerDepth - depthMapVal;
                     if (gap <= 0.0 && (i == 0 || previousGap > 0.0)) {
                         // A sign change caused by crossing a silhouette is a vertical side wall,
@@ -154,10 +149,10 @@ internal object ParallaxShaders {
                         // accept the real near/far surface, never an intermediate wall depth.
                         bool wall = false;
                         if (uLayered < 0.5) {
-                            float left = texture2D(uDepthMap, currentUV - vec2(uDepthTexel.x, 0.0)).b;
-                            float right = texture2D(uDepthMap, currentUV + vec2(uDepthTexel.x, 0.0)).b;
-                            float top = texture2D(uDepthMap, currentUV - vec2(0.0, uDepthTexel.y)).b;
-                            float bottom = texture2D(uDepthMap, currentUV + vec2(0.0, uDepthTexel.y)).b;
+                            float left = texture2D(uDepthMap, clamp(currentUV - vec2(uDepthTexel.x, 0.0), 0.0, 1.0)).b;
+                            float right = texture2D(uDepthMap, clamp(currentUV + vec2(uDepthTexel.x, 0.0), 0.0, 1.0)).b;
+                            float top = texture2D(uDepthMap, clamp(currentUV - vec2(0.0, uDepthTexel.y), 0.0, 1.0)).b;
+                            float bottom = texture2D(uDepthMap, clamp(currentUV + vec2(0.0, uDepthTexel.y), 0.0, 1.0)).b;
                             float low = min(min(left, right), min(top, bottom));
                             float high = max(max(left, right), max(top, bottom));
                             wall = high - low > 0.12 &&
@@ -170,7 +165,7 @@ internal object ParallaxShaders {
                                 for (int j = 0; j < 5; j++) {
                                     vec2 midUV = (beforeUV + currentUV) * 0.5;
                                     float midDepth = (beforeDepth + currentLayerDepth) * 0.5;
-                                    if (midDepth <= texture2D(uDepthMap, midUV).b) {
+                                    if (midDepth <= texture2D(uDepthMap, clamp(midUV, 0.0, 1.0)).b) {
                                         currentUV = midUV;
                                         currentLayerDepth = midDepth;
                                     } else {
@@ -203,7 +198,7 @@ internal object ParallaxShaders {
 
             // Depth of field: blur grows with the distance from the neutral (in-focus) plane.
             if (uBlur > 0.0) {
-                float away = abs(texture2D(uDepthMap, finalUV).r - uNeutral);
+                float away = abs(texture2D(uDepthMap, clamp(finalUV, 0.0, 1.0)).r - uNeutral);
                 float radius = uBlur * smoothstep(0.0, 0.6, away) * 0.012;
                 if (radius > 0.0004) {
                     vec2 stretch = vec2(1.0, uImageAspect);
@@ -211,10 +206,8 @@ internal object ParallaxShaders {
                     for (int i = 0; i < 8; i++) {
                         float a = float(i) * 0.785398;
                         vec2 dir = vec2(cos(a), sin(a)) * stretch;
-                        sum += compose(clamp(finalUV + dir * radius, 0.0, 1.0),
-                            clamp(backgroundUV + dir * radius, 0.0, 1.0), hasSurface);
-                        sum += compose(clamp(finalUV + dir * radius * 0.5, 0.0, 1.0),
-                            clamp(backgroundUV + dir * radius * 0.5, 0.0, 1.0), hasSurface);
+                        sum += compose(finalUV + dir * radius, backgroundUV + dir * radius, hasSurface);
+                        sum += compose(finalUV + dir * radius * 0.5, backgroundUV + dir * radius * 0.5, hasSurface);
                     }
                     color = sum / 17.0;
                 }

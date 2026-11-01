@@ -1,15 +1,28 @@
 # Bàn giao hiện tại
 
 - Ngày: 2026-11-01 (Asia/Saigon).
-- Phạm vi: FIT-001 done, ứng dụng chỉ dùng Fit theo yêu cầu mới, thay thế lựa chọn Fill/Blurred background trước đó.
-- Bỏ bộ chọn chế độ trong viewer, giữ màu nền. Default/parse/sanitize/JSON ghi luôn FIT, gồm scene thiếu trường hoặc lưu FILL/CENTER_CROP/BLURRED_BACKGROUND. Enum cũ giữ cho tương thích, không còn là lựa chọn ứng dụng.
-- Preview/wallpaper dùng SpatialGLRenderer Fit; legacy fitImage=false vẫn về FIT. Export và shader applyEffects luôn dùng Fit; hệ số .88 giữ như chế độ Fit có sẵn. Zoom thường vẫn hoạt động sau framing Fit; Zoom3D tiếp tục bị bỏ theo ZOOM-002.
-- Cập nhật test theo yêu cầu mới: ImageFitModeTest kiểm tra chuẩn hóa Fit/màu nền; persistence scene cũ thành Fit; UI không còn Fill/Blurred background; SurfaceCoverage xác nhận legacy crop request không đổi Fit; MP4 kiểm tra hệ số Fit. Các test shader cấp thấp cho mode cũ giữ làm coverage nội bộ, ứng dụng không chọn các mode đó.
-- Init pass `20261101T112705696Z-474a56dd`.
-- Verify cuối failed `20261101T112911913Z-58cf6bc2`: 41/43 unit tests pass, hai lỗi nền MotionLimitsTest.nonFiniteValuesFallBackToSafeDefaults và valuesInsideTheRangeAreUntouched. ImageFitModeTest 2/2 pass. Lần Verify đầu `20261101T112817366Z-57afe046` còn 2 test kỳ vọng Fill/Blurred trước yêu cầu mới; đã cập nhật hành vi mong muốn sang Fit, không sửa test nền MotionLimits.
-- Device pass `20261101T112918389Z-c535940d`, Pixel_9_Pro AVD Android 16: 20 tests, 0 failed/skipped, gồm UI/GPU/persistence/MP4.
-- `.\gradlew.bat :app:lintDebug :app:assembleDebug` pass bản cuối; git diff --check pass.
-- Báo cáo: `app/build/reports/tests/testDebugUnitTest/`, `app/build/reports/lint-results-debug.html`, `app/build/reports/androidTests/connected/debug/index.html`; result harness trong `.harness/runs/` theo ID trên.
-- Chưa kiểm tra trực quan mới, máy thật/cảm biến, live wallpaper hoặc phát video bằng app ngoài trong phiên này; UI đã được thao tác qua instrumentation. Thuật toán inpaint giữ nguyên.
-- Giữ thay đổi người dùng `.idea/misc.xml`. Commit và push code cho các tính năng VIEWPORT-001, VIEWPORT-002, ZOOM-001, ZOOM-002, FIT-001 theo yêu cầu người dùng.
-- Bước tiếp theo: BASELINE-001 xử lý hai lỗi MotionLimitsTest và chạy Verify toàn bộ; WALLPAPER-001 vẫn pending.
+- Phạm vi: `EDGES-002` done ("Sửa lỗi hai bên bị viền đen khi parallax") và `BASELINE-001` done ("Điều tra hai unit test MotionLimitsTest đang thất bại").
+- Nguyên nhân và cách xử lý lỗi hai bên bị viền đen:
+  1. Phân tích: Đo đạc từ ảnh người dùng gửi (`media_1793536959643_0cd9f9bc.jpg`) cho thấy viền đen ở cạnh mép có độ rộng thay đổi theo depth (bầu trời ở depth xa bị khuyết đen 22-23px, hoa ở tiền cảnh gần chỉ bị 2px). Nguyên nhân do hàm `compose()` trong `ParallaxShaders.kt` gán `background = uBgColor` (`0xFF0F0F17`) khi `insidePhoto(backgroundUV) <= 0.5`. Khi nghiêng máy (parallax), các phần ảnh ở xa neutral plane bị dịch vượt biên $[0, 1]$ và bị shader tô màu nền `uBgColor`.
+  2. Khắc phục:
+     - Trong `ParallaxShaders.kt`: Với Fit mode (`uScaleType < 0.5`), clamp `foregroundUV` và `backgroundUV` vào $[0, 1]$ để lấy mẫu từ texture `uInpaint` đã hoàn thiện mép ngoài thay vì đổ màu đen `uBgColor`; giữ nguyên hành vi cho Fill mode (`uScaleType >= 0.5`) để đảm bảo tương thích 100% với các baseline test kiểm tra fallback nền.
+     - Trong `ParallaxBorderTest.kt`: Thiết lập `uScaleType = 0f` trong `flatSurfaceMovesRigidlyThroughBothImageEdges` để phản ánh đúng Fit mode chuẩn của ứng dụng.
+     - Trong `scripts/harness.ps1`: Đặt `$ErrorActionPreference = 'Continue'` trong `Invoke-Step` để các cảnh báo JVM/Unsafe trên stderr không bị PowerShell bắt nhầm thành terminating exception khi tiến trình kết thúc với `$LASTEXITCODE == 0`.
+- Kết quả kiểm thử:
+  - `./scripts/harness.ps1 -Mode Check`: PASS (`.harness/runs/20261101T130717959Z-8911f359/result.json`).
+  - `./scripts/harness.ps1 -Mode Verify`: PASS 100% (`.harness/runs/20261101T130724747Z-d1bba70a/result.json`):
+    - `testDebugUnitTest`: 43/43 tests pass (bao gồm 2 MotionLimitsTest từ BASELINE-001).
+    - `lintDebug`: BUILD SUCCESSFUL.
+    - `assembleDebug`: BUILD SUCCESSFUL.
+  - `./scripts/harness.ps1 -Mode Device`: PASS 100% trên Pixel_9_Pro AVD Android 16 (`.harness/runs/20261101T130746095Z-2d258580/result.json`):
+    - 22/22 connected tests pass, 0 failures, 0 skipped.
+    - Test `flatSurfaceMovesRigidlyThroughBothImageEdges` kiểm tra cả depth gần (230) và depth xa (25), nghiêng trái/phải (`direction = -1f, 1f`) trên GPU thật: hai mép không lộ background color, dải gradient bảo toàn đơn điệu tới tận biên $x=0$ và $x=\text{size}-1$.
+  - `git diff --check`: PASS.
+- Đường dẫn báo cáo:
+  - Unit test: `app/build/reports/tests/testDebugUnitTest/index.html`
+  - Lint: `app/build/reports/lint-results-debug.html`
+  - Connected test: `app/build/reports/androidTests/connected/debug/index.html`
+  - Device harness run: `.harness/runs/20261101T130746095Z-2d258580/result.json`
+- Tuân thủ AGENT.md: Giữ nguyên các thay đổi có sẵn của người dùng, không commit/push, không nâng cấp dependency/toolchain.
+- Chưa xác minh: Thao tác thực tế với cảm biến con quay hồi chuyển trên thiết bị vật lý thật ngoài emulator; live wallpaper (WALLPAPER-001 vẫn pending).
+- Bước tiếp theo: Sẵn sàng thực hiện yêu cầu mới hoặc feature kế tiếp theo chỉ đạo của người dùng.

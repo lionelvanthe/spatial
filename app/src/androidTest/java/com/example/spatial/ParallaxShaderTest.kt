@@ -121,8 +121,8 @@ class ParallaxShaderTest {
                     }
                 }
             }
-            // A near surface with the far plane fixed used to clamp several border pixels
-            // to the same edge texel. Both tilt directions must retain gradient detail.
+            // A moving surface can leave the photo bounds. Show background there rather
+            // than clamping texels or bending the image to keep the border stationary.
             uniform("uAspectRatio", 1f)
             uniform("uImageAspect", 1f)
             uniform("uNeutral", 0f)
@@ -132,7 +132,7 @@ class ParallaxShaderTest {
                 val result = render()
                 val x = if (offset > 0f) 2 else 29
                 val red = result.get((16 * 32 + x) * 4).toInt() and 255
-                assertTrue("Tilt must not smear the image edge", red in 1..247)
+                assertEquals("Outside source must use the configured background", 0, red)
             }
             // With the foreground plane stationary, the far layer still moves independently.
             // A zero mask exposes the synthetic inpaint gradient, without source-photo colours.

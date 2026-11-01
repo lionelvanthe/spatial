@@ -60,18 +60,17 @@ class ImageFitRenderingTest {
                             val crop = mode == ImageFitMode.FILL
                             val spanX = if (crop) minOf(ratio, 1f) else maxOf(ratio, 1f)
                             val spanY = if (crop) minOf(1 / ratio, 1f) else maxOf(1 / ratio, 1f)
-                            if (mode != ImageFitMode.FIT) assertFalse("Fill/backdrop must cover every pixel", pixels.any { it == Color.GREEN })
+                            if (mode == ImageFitMode.BLURRED_BACKGROUND || (mode == ImageFitMode.FILL && strength == 0f)) {
+                                assertFalse("Base Fill/backdrop must cover every pixel", pixels.any { it == Color.GREEN })
+                            }
                             for (y in listOf(vh / 4, vh / 2, vh * 3 / 4)) for (x in listOf(vw / 4, vw / 2, vw * 3 / 4)) {
                                 val u = ((x + .5f) / vw - .5f) * spanX + .5f
                                 val v = ((y + .5f) / vh - .5f) * spanY + .5f
                                 if (u !in .08f.. .92f || v !in .08f.. .92f) continue
                                 val p = direction * .04f * strength
-                                val travel = abs(p) * .5f
-                                val limit = if (travel == 0f) 100f else minOf(u, 1 - u) / travel
-                                val bounded = p * (1 - exp(-limit * limit))
                                 // RGB.r encodes exactly the sampled depth. Solve the inverse
                                 // continuous surface analytically, independently of shader iteration.
-                                val expectedRed = (40 + 180 * (u + bounded * .5f)) / (1 + 180 * bounded / 255)
+                                val expectedRed = (40 + 180 * (u + p * .5f)) / (1 + 180 * p / 255)
                                 val pixel = pixels[y * vw + x]
                                 assertTrue("RGB/depth alignment $mode ${iw}x$ih strength=$strength", abs(Color.red(pixel) - expectedRed) <= 3)
                                 assertTrue("Aspect-preserving Y coordinate", abs(Color.green(pixel) - (30 + 170 * v)) <= 2)

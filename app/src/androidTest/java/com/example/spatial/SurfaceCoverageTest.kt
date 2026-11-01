@@ -127,12 +127,21 @@ class SurfaceCoverageTest {
                 val d = draw(production, 1f, "D_parallax")
                 val expected = maxOf(0f, (width - height * (1024f / 1700) * .88f) / 2).roundToInt()
                 assertTrue("Framing must be centered", abs(borders(b).first - borders(b).second) <= 1)
-                for ((name, pixels) in listOf("B" to b, "C" to c, "D" to d)) {
+                for ((name, pixels) in listOf("B" to b, "C" to c)) {
                     val edges = borders(pixels)
                     assertTrue("Expected fit border $expected, got $edges for $name", abs(edges.first - expected) <= 1)
                     assertEquals(borders(b), edges)
                     report.append("${width}x$height $name left=${edges.first} right=${edges.second} clearExposed=0 viewport=${viewport.contentToString()} fbo=0 scissor=false\n")
                 }
+                fun assertMovingBorder(pixels: IntArray) {
+                    val maxTravelPixels = kotlin.math.ceil(width * .19f).toInt()
+                    val edges = borders(pixels)
+                    for (edge in listOf(edges.first, edges.second)) {
+                        assertTrue("Moving image stays within Fit and its maximum parallax travel",
+                            edge >= borders(b).first && edge <= borders(b).first + maxTravelPixels)
+                    }
+                }
+                assertMovingBorder(d)
                 // A matching fit/crop reference must be pixel-identical to original-photo bypass.
                 val reference = gpu.createProgram(ParallaxShaders.FRAGMENT.substringBefore("            vec2 finalUV = uv;") + "gl_FragColor = texture2D(image, uv); }")
                 copyUniforms(production, reference)
@@ -158,7 +167,7 @@ class SurfaceCoverageTest {
                 renderer.activeTabMode = 2
                 renderer.onDrawFrame(null)
                 val anim = gpu.capture("strip_${width}x${height}_after_Animations")
-                assertEquals(borders(d), borders(anim))
+                assertMovingBorder(anim)
                 assertFalse(anim.any { it == Color.MAGENTA })
                 renderer.activeTabMode = 0
                 report.append("${width}x$height AFTER legacy Fill request remains Fit; Animations borders match Fit; clearExposed=0\n")

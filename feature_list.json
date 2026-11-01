@@ -23,14 +23,17 @@
     {
       "id": "BASELINE-001",
       "title": "Điều tra hai unit test MotionLimitsTest đang thất bại",
-      "status": "pending",
+      "status": "done",
       "depends_on": [],
       "acceptance": [
         "Đối chiếu expected behavior với SpatialSceneConfig và MotionLimits trước khi sửa",
         "nonFiniteValuesFallBackToSafeDefaults và valuesInsideTheRangeAreUntouched pass với tiêu chí đúng",
         "Chạy Verify thành công qua unit test, lint và assembleDebug"
       ],
-      "evidence": []
+      "evidence": [
+        "2026-11-01: Đối chiếu MotionLimits và SpatialSceneConfig: default speed là 0.35f, kỳ vọng cũ 0.7f trong nonFiniteValuesFallBackToSafeDefaults không khớp với giá trị fallback an toàn. Với valuesInsideTheRangeAreUntouched, input intensity = 0.3f và zoom = -0.5f vượt ngoài MAX_INTENSITY (0.15f) và MIN_ZOOM (-0.35f); đã cập nhật input test thành các giá trị nằm trong khoảng hợp lệ (intensity = 0.1f, zoom = -0.2f).",
+        "2026-11-01: Init pass (20261101T121825011Z-faa353b3). Chạy riêng MotionLimitsTest: 5/5 pass. Verify pass toàn bộ (20261101T121853856Z-eb5b3efe): :app:testDebugUnitTest (43/43 tests pass), :app:lintDebug, :app:assembleDebug đều thành công."
+      ]
     },
     {
       "id": "WALLPAPER-001",
@@ -160,6 +163,40 @@
         "2026-11-01: Init pass 20261101T112705696Z-474a56dd. Verify cuối failed 20261101T112911913Z-58cf6bc2: 41/43 tests pass, hai MotionLimitsTest có sẵn; ImageFitModeTest 2/2 pass. Verify lần đầu còn fail 2 test kỳ vọng chế độ cũ, đã cập nhật đúng yêu cầu chỉ Fit rồi chạy lại.",
         "2026-11-01: Device pass 20261101T112918389Z-c535940d, Pixel_9_Pro AVD Android 16: 20 tests, 0 failed/skipped. UI không còn Fill/Blurred background, roundtrip scene cũ về FIT, viewport/framing Fit và MP4 theo Fit pass. :app:lintDebug :app:assembleDebug pass. Chưa kiểm tra trực quan/máy thật và wallpaper trong phiên này."
       ]
+    },
+    {
+      "id": "EDGES-001",
+      "title": "Sửa kéo giãn ảnh ở hai mép khi parallax",
+      "status": "done",
+      "depends_on": [
+        "FIT-001"
+      ],
+      "acceptance": [
+        "Depth phẳng dịch ảnh đều tới sát mép, không co giãn do giảm chuyển động theo pixel",
+        "Vùng lấy mẫu ngoài ảnh dùng nền thay vì kéo lặp pixel mép; giữ Fit và zoom",
+        "Chạy Verify, Device, lint/build và đối chiếu trực quan scene bị ảnh hưởng"
+      ],
+      "evidence": [
+        "2026-11-01: Test GPU mới flatSurfaceMovesRigidlyThroughBothImageEdges tái hiện lỗi trước sửa: vùng ngoài nguồn vẫn lấy RGB mép. Sau sửa pass cho depth gần/xa và cả hai hướng, đối chiếu gradient với phép dịch độc lập tại nhiều vị trí sát mép.",
+        "2026-11-01: Bỏ rayLimit/giảm parallax theo pixel gần biên gây co giãn ảnh. Giữ phép dịch theo depth nhất quán; compose dùng nền khi source UV ngoài ảnh. Không đổi Fit, zoom, model, assets hoặc dependency. Shader chung áp dụng preview/wallpaper/export.",
+        "2026-11-01: Init pass 20261101T113728135Z-50c547bd. Verify failed 20261101T113934581Z-a38528dc: 41/43 unit tests pass, 2 MotionLimitsTest lỗi nền. :app:lintDebug :app:assembleDebug pass.",
+        "2026-11-01: Device cuối pass 20261101T114308167Z-469a47fb trên Pixel_9_Pro AVD Android 16: 22 tests, 0 failed/skipped. Test cũ cố định mép trong khi nghiêng được cập nhật thành giới hạn dịch hợp lệ và dùng nền khi vượt ảnh, kiểm tra RGB/depth/Fit/GL viewport vẫn giữ.",
+        "2026-11-01: Chạy riêng ParallaxBorderTest bằng am instrument sau cài APK debug/test: OK 2 tests. Đã xem render thật Cliffside ở gyroX -1/0/+1: .harness/cliff_edge_-1.0.png, cliff_edge_0.0.png, cliff_edge_1.0.png; phần cây sát mép không còn kéo thành dải. Chưa xác minh cảm biến/wallpaper trên máy thật."
+      ]
+    },
+    {
+      "id": "EDGES-002",
+      "title": "Sửa lỗi hai bên bị viền đen khi parallax",
+      "status": "in_progress",
+      "depends_on": [
+        "EDGES-001"
+      ],
+      "acceptance": [
+        "Khi nghiêng máy ở các góc tilt (gyroX -1/0/+1), hai bên mép ảnh không bị viền đen do tia parallax rơi ra ngoài nguồn",
+        "Chuyển động parallax đồng nhất theo depth tới sát mép ảnh, không kéo giãn biến dạng mép",
+        "Chạy Verify và Device thành công; kiểm tra trực quan trên ảnh render Cliffside Village"
+      ],
+      "evidence": []
     }
   ]
 }

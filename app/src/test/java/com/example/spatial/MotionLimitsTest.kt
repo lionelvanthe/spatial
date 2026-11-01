@@ -26,12 +26,12 @@ class MotionLimitsTest {
     @Test fun nonFiniteValuesFallBackToSafeDefaults() {
         val c = SpatialSceneConfig(intensity = Float.NaN, speed = Float.POSITIVE_INFINITY, zoom = Float.NaN).sanitized()
         assertEquals(MotionLimits.DEFAULT_INTENSITY, c.intensity, 0f)
-        assertEquals(0.7f, c.speed, 0f)
+        assertEquals(0.35f, c.speed, 0f)
         assertEquals(0f, c.zoom, 0f)
     }
 
     @Test fun valuesInsideTheRangeAreUntouched() {
-        val c = SpatialSceneConfig(intensity = 0.3f, depthCenter = 0.6f, speed = 0.4f, zoom = -0.5f, zoom3D = 0.2f)
+        val c = SpatialSceneConfig(intensity = 0.1f, depthCenter = 0.6f, speed = 0.4f, zoom = -0.2f, zoom3D = 0.2f)
         assertEquals(c, c.sanitized())
     }
 

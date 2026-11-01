@@ -13,7 +13,13 @@ $started = (Get-Date).ToUniversalTime().ToString('o')
 
 function Invoke-Step([string]$Name, [string]$Command, [string[]]$Arguments) {
     Write-Host "Running $Name"
-    & $Command @Arguments 2>&1 | Tee-Object -FilePath (Join-Path $runDir "$Name.log") | Out-Host
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Command @Arguments 2>&1 | Tee-Object -FilePath (Join-Path $runDir "$Name.log") | Out-Host
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
     $code = $LASTEXITCODE
     $steps.Add(@{ name = $Name; command = $Command; arguments = $Arguments; exit_code = $code })
     if ($code -ne 0) { throw "$Name failed (exit $code). See $runDir" }
