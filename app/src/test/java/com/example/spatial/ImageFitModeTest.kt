@@ -7,16 +7,17 @@ import org.junit.Test
 
 class ImageFitModeTest {
     @Test fun aliasesAndOldConfigurationUseSafeDefaults() {
-        assertEquals(ImageFitMode.FILL, ImageFitMode.parse("CENTER_CROP"))
+        assertEquals(ImageFitMode.FIT, ImageFitMode.parse("CENTER_CROP"))
         assertEquals(ImageFitMode.FIT, ImageFitMode.parse("fit"))
-        assertEquals(ImageFitMode.BLURRED_BACKGROUND, ImageFitMode.parse("blurred_background"))
-        assertEquals(ImageFitMode.FILL, ImageFitMode.parse("unsupported"))
-        assertEquals(ImageFitMode.FILL, SpatialSceneConfig().imageFitMode)
+        assertEquals(ImageFitMode.FIT, ImageFitMode.parse("blurred_background"))
+        assertEquals(ImageFitMode.FIT, ImageFitMode.parse("FILL"))
+        assertEquals(ImageFitMode.FIT, ImageFitMode.parse("unsupported"))
+        assertEquals(ImageFitMode.FIT, SpatialSceneConfig().imageFitMode)
     }
 
-    @Test fun sanitizationPreservesPresentationSettings() {
+    @Test fun sanitizationForcesFitAndPreservesBackgroundColor() {
         val c = SpatialSceneConfig(imageFitMode = ImageFitMode.BLURRED_BACKGROUND, backgroundColor = 0xFF123456.toInt())
-        assertEquals(c.imageFitMode, c.sanitized().imageFitMode)
+        assertEquals(ImageFitMode.FIT, c.sanitized().imageFitMode)
         assertEquals(c.backgroundColor, c.sanitized().backgroundColor)
     }
 }

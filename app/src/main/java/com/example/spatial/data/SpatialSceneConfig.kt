@@ -3,11 +3,11 @@ package com.example.spatial.data
 import org.json.JSONObject
 
 enum class ImageFitMode(val shaderValue: Float, val label: String) {
+    // Old values remain readable for scene compatibility; the app only uses FIT.
     FIT(0f, "Fit"), FILL(1f, "Fill"), BLURRED_BACKGROUND(2f, "Blurred background");
 
     companion object {
-        fun parse(value: String): ImageFitMode = if (value.equals("CENTER_CROP", true)) FILL
-            else entries.firstOrNull { it.name.equals(value, true) } ?: FILL
+        fun parse(value: String): ImageFitMode = FIT
     }
 }
 
@@ -28,7 +28,7 @@ data class SpatialSceneConfig(
     val depthCenter: Float = 0.5f,
     val speed: Float = 0.35f,
     val zoom: Float = 0.0f,             // 2D/3D image zoom (-1.0 to 1.0)
-    val zoom3D: Float = 0.0f,           // 3D perspective depth scale (0.0 to 1.0)
+    val zoom3D: Float = 0.0f,           // Legacy metadata only; no longer used for rendering.
     val rInverted: Boolean = false,     // Invert gyro / motion
     val wallTargetX: Float = 0.5f,
     val wallTargetY: Float = 0.5f,
@@ -41,10 +41,11 @@ data class SpatialSceneConfig(
     val sepia: Float = 0.0f,            // brown tint (0.0 to 1.0)
     val isometric: Float = 1.0f,        // 1 = parallel view rays (flat), 0 = full perspective
     val dolly: Float = 0.0f,            // camera push (+) in / pull (-) out, magnifying near layers
-    val imageFitMode: ImageFitMode = ImageFitMode.FILL,
+    val imageFitMode: ImageFitMode = ImageFitMode.FIT,
     val backgroundColor: Int = 0xFF0F0F17.toInt()
 ) {
     fun sanitized(): SpatialSceneConfig = copy(
+        imageFitMode = ImageFitMode.FIT,
         intensity = intensity.finiteOr(MotionLimits.DEFAULT_INTENSITY).coerceIn(0f, MotionLimits.MAX_INTENSITY),
         depthCenter = depthCenter.finiteOr(0.5f).coerceIn(0f, 1f),
         speed = speed.finiteOr(0.35f).coerceIn(0f, 1f),
@@ -82,7 +83,7 @@ data class SpatialSceneConfig(
         obj.put("sepia", sepia.toDouble())
         obj.put("isometric", isometric.toDouble())
         obj.put("dolly", dolly.toDouble())
-        obj.put("imageFitMode", imageFitMode.name)
+        obj.put("imageFitMode", ImageFitMode.FIT.name)
         obj.put("backgroundColor", backgroundColor)
         return obj.toString()
     }
@@ -110,7 +111,7 @@ data class SpatialSceneConfig(
                     sepia = obj.optDouble("sepia", 0.0).toFloat(),
                     isometric = obj.optDouble("isometric", 1.0).toFloat(),
                     dolly = obj.optDouble("dolly", 0.0).toFloat(),
-                    imageFitMode = ImageFitMode.parse(obj.optString("imageFitMode", "FILL")),
+                    imageFitMode = ImageFitMode.parse(obj.optString("imageFitMode", "FIT")),
                     backgroundColor = obj.optInt("backgroundColor", 0xFF0F0F17.toInt())
                 ).sanitized()
             } catch (e: Exception) {

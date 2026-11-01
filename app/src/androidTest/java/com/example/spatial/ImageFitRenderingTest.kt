@@ -18,14 +18,14 @@ import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class ImageFitRenderingTest {
-    @Test fun fillZoomOutAndExtremePanNeverRevealUncoveredPixels() {
+    @Test fun fillAtBaseZoomAndExtremePanNeverRevealUncoveredPixels() {
         ParallaxGpuFixture(120, 160).use { gpu ->
             val color = Color.rgb(120, 80, 160)
             gpu.upload(0, gpu.bitmap { _, _ -> color })
             gpu.upload(3, gpu.bitmap { _, _ -> Color.WHITE })
             gpu.uniform("uImageAspect", 2f)
             gpu.uniform("uNeutral", 128f / 255)
-            gpu.uniform("uZoom", .25f)
+            gpu.uniform("uZoom", 1f)
             GLES20.glUniform4f(gpu.location("uBgColor"), 0f, 1f, 0f, 1f)
             for (direction in floatArrayOf(-1f, 1f)) {
                 GLES20.glUniform2f(gpu.location("uPan"), direction * 2, direction * 2)
@@ -106,14 +106,16 @@ class ImageFitRenderingTest {
         }
     }
 
-    @Test fun modesAndBackgroundColorSurviveScenePersistence() {
+    @Test fun oldModesBecomeFitAndBackgroundColorSurvivesPersistence() {
         for (mode in ImageFitMode.entries) {
             val config = SpatialSceneConfig(imageFitMode = mode, backgroundColor = Color.rgb(12, 80, 135))
-            assertEquals(config, SpatialSceneConfig.fromJson(config.toJson()))
+            assertEquals(config.copy(imageFitMode = ImageFitMode.FIT), SpatialSceneConfig.fromJson(config.toJson()))
+            assertEquals(ImageFitMode.FIT, config.sanitized().imageFitMode)
+            assertEquals(ImageFitMode.FIT, SpatialSceneConfig.fromJson("{\"imageFitMode\":\"${mode.name}\"}").imageFitMode)
         }
-        assertEquals(ImageFitMode.FILL, ImageFitMode.parse("CENTER_CROP"))
-        assertEquals(ImageFitMode.FILL, ImageFitMode.parse("unknown"))
-        assertEquals(ImageFitMode.FILL, SpatialSceneConfig.fromJson("{}").imageFitMode)
+        assertEquals(ImageFitMode.FIT, ImageFitMode.parse("CENTER_CROP"))
+        assertEquals(ImageFitMode.FIT, ImageFitMode.parse("unknown"))
+        assertEquals(ImageFitMode.FIT, SpatialSceneConfig.fromJson("{}").imageFitMode)
         ParallaxGpuFixture().use { gpu ->
             val color = Color.rgb(12, 80, 135)
             com.example.spatial.gl.ParallaxShaders.applyEffects(gpu.program,

@@ -36,7 +36,6 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var uFillHandle = 0
     private var uZoomHandle = 0
     private var uPanHandle = 0
-    private var uZoom3DHandle = 0
     private var uStrengthHandle = 0
     private var aPositionHandle = 0
     private var aTextureSTHandle = 0
@@ -70,10 +69,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // 0 = Rotate (Rotational Tilt), 1 = Shake (Dynamic Jelly Physics), 2 = Animations, 3 = ZoomPan
     @Volatile
     var activeTabMode = 0
-    // true = whole photo visible (editor/viewer); false = edge-to-edge crop (wallpaper)
+    // Legacy entry point: every app surface now uses Fit, including wallpaper.
     var fitImage: Boolean
         get() = sceneConfig.imageFitMode == com.example.spatial.data.ImageFitMode.FIT
-        set(value) { sceneConfig = sceneConfig.copy(imageFitMode = if (value) com.example.spatial.data.ImageFitMode.FIT else com.example.spatial.data.ImageFitMode.FILL) }
+        set(value) { sceneConfig = sceneConfig.copy(imageFitMode = com.example.spatial.data.ImageFitMode.FIT) }
     // Sensor inputs (from Gyroscope / Accelerometer)
     @Volatile
     var gyroX = 0.0f
@@ -208,7 +207,6 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             uFillHandle = GLES20.glGetUniformLocation(programHandle, "uFill")
             uZoomHandle = GLES20.glGetUniformLocation(programHandle, "uZoom")
             uPanHandle = GLES20.glGetUniformLocation(programHandle, "uPan")
-            uZoom3DHandle = GLES20.glGetUniformLocation(programHandle, "uZoom3D")
             uStrengthHandle = GLES20.glGetUniformLocation(programHandle, "uStrength")
             aPositionHandle = GLES20.glGetAttribLocation(programHandle, "position")
             aTextureSTHandle = GLES20.glGetAttribLocation(programHandle, "textureST")
@@ -272,18 +270,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val progress = (now % cycleDurationMs.toLong()).toFloat() / cycleDurationMs
         val cycle = progress * 2.0f * Math.PI.toFloat()
         val animIntensity = 0.65f * (0.4f + 0.7f * sceneConfig.intensity.coerceIn(0.0f, 1.25f))
-        // Native zoom -> shiftZ formula from performRotationalUpdate (0x141a8..0x141f0) & performAnimatedUpdate (0x1439c):
-        // effectiveZoom = (zoom < 0.0f) ? (zoom * 0.5f) : zoom
-        val effectiveZoom = ViewerFraming.effectiveZoom(sceneConfig.zoom, activeTabMode)
-        var animZ = if (activeTabMode == 2) {
-            (1.0f - cos(cycle)) * effectiveZoom * 0.1f
-        } else {
-            0.0f
-        }
         MotionPattern.sample(sceneConfig.patternId, cycle, animIntensity, patternSample)
         val animX = patternSample[0]
         val animY = patternSample[1]
-        if (!patternSample[2].isNaN()) animZ = patternSample[2]
+        val animationZoom = if (activeTabMode == 2 && !patternSample[2].isNaN()) patternSample[2] else 0f
         // Invert factor
         val invertMult = if (sceneConfig.rInverted) -1.0f else 1.0f
         var targetTiltX: Float
@@ -382,12 +372,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // Camera distance (cameraZ) handles the dynamic 2D/3D zoom scaling.
         // When sliderZoom == 0f and touchZoom == 0f, zoomScale is strictly 1.0f,
         // positioning the camera at baseDistance (2.4f) and returning the quad to 100% exact initial size.
-        val sliderZoom = effectiveZoom
-        val zoomScale = (1.0f + sliderZoom * 0.6f + touchZoom).coerceIn(0.5f, 2.5f)
+        val zoomScale = ViewerFraming.zoomScale(sceneConfig.zoom, activeTabMode, touchZoom, animationZoom)
         val cameraZ = baseDistance / zoomScale
         // Update mesh vertices with exact distortion-free dimensions and native C++ parameter formulas
         val effectiveDepthCenter = ViewerFraming.depthCenter(sceneConfig.depthCenter)
-        val effectiveZoom3D = ViewerFraming.zoom3D(sceneConfig.zoom, sceneConfig.zoom3D, activeTabMode)
         // Flat clip-space rectangle for the ray-march shader.
         rayMarchMesh.setUniformDepth(0.0f)
         rayMarchMesh.updateMesh(
@@ -421,10 +409,9 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glUniform1f(uImageAspectHandle, imageAspect)
         GLES20.glUniform4f(uBgColorHandle, 0.06f, 0.06f, 0.09f, 1.0f)
         GLES20.glUniform1f(uScaleTypeHandle, if (fitImage) 0.0f else 1.0f)
-        GLES20.glUniform1f(uFillHandle, if (sceneConfig.imageFitMode == com.example.spatial.data.ImageFitMode.FILL) 1f else FIT_FILL)
+        GLES20.glUniform1f(uFillHandle, FIT_FILL)
         GLES20.glUniform1f(uZoomHandle, zoomScale)
         GLES20.glUniform2f(uPanHandle, if (activeTabMode == 3) touchDragX * 0.25f else 0.0f, if (activeTabMode == 3) touchDragY * 0.25f else 0.0f)
-        GLES20.glUniform1f(uZoom3DHandle, effectiveZoom3D)
         GLES20.glUniform1f(uStrengthHandle, if (activeTabMode == 3) 0.0f else 1.0f)
         ParallaxShaders.applyEffects(programHandle, sceneConfig)
         rayMarchMesh.draw(aPositionHandle, aTextureSTHandle)

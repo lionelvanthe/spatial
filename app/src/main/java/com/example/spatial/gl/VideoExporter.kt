@@ -247,10 +247,8 @@ class VideoExporter {
 
             val animIntensity = 0.65f * (0.4f + 0.7f * config.intensity)
             MotionPattern.sample(patternId, cycle, animIntensity, sample)
-            val rawZoom = config.zoom.coerceIn(-1.0f, 1.0f)
-            val effectiveZoom = if (rawZoom < 0.0f) rawZoom * 0.5f else rawZoom
-            val zoomScale = (1.0f + effectiveZoom * 0.6f).coerceIn(0.5f, 2.5f)
-            val zoom3D = if (kotlin.math.abs(config.zoom) >= 0.1f) config.zoom3D.coerceIn(0f, 1f) else 0f
+            val animationZoom = if (sample[2].isNaN()) 0f else sample[2]
+            val zoomScale = ViewerFraming.zoomScale(config.zoom, 2, animationZoom = animationZoom)
 
             for (unit in 0 until 4) {
                 GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit)
@@ -263,16 +261,14 @@ class VideoExporter {
             uniform1i("uForegroundMask", 3)
             GLES20.glUniform2f(loc("uOffset"), sample[0].coerceIn(-1f, 1f), sample[1].coerceIn(-1f, 1f))
             GLES20.glUniform1f(loc("uDepthHeight"), (0.045f + 0.115f * config.intensity).coerceIn(0.0f, 0.19f))
-            // Tab 2 mirrors the neutral plane, as the live renderer does.
-            GLES20.glUniform1f(loc("uNeutral"), (1.0f - config.depthCenter).coerceIn(0.0f, 1.0f))
+            GLES20.glUniform1f(loc("uNeutral"), ViewerFraming.depthCenter(config.depthCenter))
             GLES20.glUniform1f(loc("uAspectRatio"), width.toFloat() / height)
             GLES20.glUniform1f(loc("uImageAspect"), imageAspect)
             GLES20.glUniform4f(loc("uBgColor"), 0.06f, 0.06f, 0.09f, 1.0f)
-            GLES20.glUniform1f(loc("uScaleType"), 1.0f)
-            GLES20.glUniform1f(loc("uFill"), if (config.imageFitMode == com.example.spatial.data.ImageFitMode.FILL) FILL else .88f)
+            GLES20.glUniform1f(loc("uScaleType"), 0f)
+            GLES20.glUniform1f(loc("uFill"), .88f)
             GLES20.glUniform1f(loc("uZoom"), zoomScale)
             GLES20.glUniform2f(loc("uPan"), 0f, 0f)
-            GLES20.glUniform1f(loc("uZoom3D"), zoom3D)
             GLES20.glUniform1f(loc("uStrength"), 1.0f)
             ParallaxShaders.applyEffects(program, config)
 

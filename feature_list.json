@@ -61,6 +61,105 @@
         "2026-11-01: Chạy riêng :app:testDebugUnitTest --tests com.example.spatial.ViewerFramingTest :app:lintDebug :app:assembleDebug :app:connectedDebugAndroidTest: BUILD SUCCESSFUL; 4 test mới pass. Báo cáo app/build/reports/tests/testDebugUnitTest/, app/build/reports/lint-results-debug.html và app/build/reports/androidTests/connected/.",
         "2026-11-01: Device passed trên Pixel_9_Pro AVD Android 16 (20261101T094703621Z-0931d436); instrumentation bản cuối cũng pass. Đối chiếu trực quan Cliffside Village với zoom/zoom3D khác 0: cùng khung ảnh khi chuyển ba tab, Animations vẫn chuyển động; ảnh .harness/tab-0.png, tab-1.png, tab-2.png. Chưa thao tác pinch đa điểm và chưa kiểm tra cảm biến máy thật."
       ]
+    },
+    {
+      "id": "VIEWPORT-001",
+      "title": "Giới hạn viewport giữa toolbar và bottom bar",
+      "status": "done",
+      "depends_on": [
+        "TABS-001"
+      ],
+      "acceptance": [
+        "GLSurfaceView bắt đầu dưới toolbar và kết thúc trên thanh tab, bao gồm system insets",
+        "Chuyển các tab không làm ảnh chạy phía sau toolbar hoặc thanh tab; bảng chỉnh và thanh mẫu vẫn thao tác được",
+        "Chạy Verify, Device và kiểm tra trực quan trên emulator"
+      ],
+      "evidence": [
+        "2026-11-01: Viewport được padding theo kích thước đo thực tế của toolbar/bottom bar, bao gồm system insets; không đổi renderer, shader hay zoom. Thanh mẫu Animations và bảng chỉnh vẫn overlay bên trong vùng ảnh, giữ chiều cao viewport đồng nhất giữa bốn tab.",
+        "2026-11-01: Init pass (20261101T095532706Z-982095fd). Verify failed với 2 lỗi MotionLimitsTest có sẵn, 40/42 tests pass (20261101T095616019Z-fc1d6f0c); lint/build bị fail-fast.",
+        "2026-11-01: :app:lintDebug :app:assembleDebug pass. Test ViewerViewportLayoutTest pass: so tọa độ Surface với toolbar/bottom bar, GL_VIEWPORT với kích thước Surface, chuyển bốn tab và mở/đóng Tune.",
+        "2026-11-01: Device bản cuối pass trên Pixel_9_Pro AVD Android 16 (20261101T095857261Z-bb8f7c4a); báo cáo app/build/reports/androidTests/connected/debug/index.html. Lần Device đầu fail do test tìm node merged, đã sửa useUnmergedTree và chạy lại toàn bộ pass.",
+        "2026-11-01: Đã xem ảnh chụp trực quan Cliffside Village trên emulator: ảnh bắt đầu dưới toolbar, kết thúc trên thanh tab; .harness/viewport-between-bars.png. Chưa kiểm tra máy thật hoặc xoay màn hình trực quan."
+      ]
+    },
+    {
+      "id": "VIEWPORT-002",
+      "title": "Viewport giữ đúng tỷ lệ ảnh gốc",
+      "status": "done",
+      "depends_on": [
+        "VIEWPORT-001"
+      ],
+      "acceptance": [
+        "Viewport là hình chữ nhật lớn nhất đúng tỷ lệ ảnh, căn giữa vùng giữa toolbar và bottom bar",
+        "Chuyển tab và mở bảng chỉnh giữ nguyên tỷ lệ và kích thước viewport",
+        "Chạy Verify, Device, lint/build và kiểm tra trực quan"
+      ],
+      "evidence": [
+        "2026-11-01: AndroidView dùng aspectRatio của fullImageBitmap và được căn giữa trong Box giữa toolbar/bottom bar; viewport là hình chữ nhật lớn nhất vừa vùng khả dụng. Giữ zoom và renderer hiện có.",
+        "2026-11-01: Init pass (20261101T100248596Z-e4c39977). Verify failed do 2 MotionLimitsTest có sẵn, 40/42 pass (20261101T100340222Z-45e87461). Lint/build chạy riêng pass với bản cuối.",
+        "2026-11-01: Device bản cuối pass (20261101T100534980Z-3ca7c424), Pixel_9_Pro AVD Android 16. ViewerViewportLayoutTest kiểm tra tỷ lệ bitmap, căn giữa, vùng giới hạn, kích thước lớn nhất, GL_VIEWPORT, bốn tab, Tune và thay scene ngang 160x80, vuông 96x96, dọc 80x160.",
+        "2026-11-01: Lần Device đầu bị lỗi output dex khi hai Gradle build chạy đồng thời (20261101T100356592Z-803f9a82); chạy tuần tự lại pass. Đã xem ảnh trực quan Cliffside Village tại .harness/viewport-image-ratio.png. Chưa xoay màn hình trực quan hoặc kiểm tra máy thật."
+      ]
+    },
+    {
+      "id": "ZOOM-001",
+      "title": "Sửa Zoom và Zoom 3D trong viewer và export",
+      "status": "done",
+      "depends_on": [
+        "VIEWPORT-002"
+      ],
+      "acceptance": [
+        "Thanh zoom dùng cùng giới hạn cấu hình, toàn dải thao tác có hiệu lực",
+        "Zoom phóng/thu liên tục quanh tâm; Zoom 3D theo hướng và cường độ zoom, không nhảy tại ngưỡng",
+        "Ảnh/depth/mask/background dùng cùng phép chiếu; preview và export dùng chung tham số zoom",
+        "Chạy Verify, Device, lint/build và kiểm tra trực quan"
+      ],
+      "evidence": [
+        "2026-11-01: Người dùng xác nhận kéo nhưng ảnh ít/không đổi. Đồng bộ range UI với MotionLimits, sanitize config khi chỉnh; tách base Fit/Fill khỏi zoom để không có vùng chết. Không tăng giới hạn MotionLimits.",
+        "2026-11-01: Zoom3D liên tục theo signed effectiveZoom và depth; không còn ngưỡng abs(zoom)>=0.1 hay phụ thuộc focal plane. RGB/depth/mask/far background dùng cùng phép chiếu trong ray march; vùng ngoài nguồn không lặp texel. Preview/export dùng chung zoomScale, zoom3D, depthCenter; mẫu Zoom được áp dụng.",
+        "2026-11-01: Init pass 20261101T101027227Z-02969a4f. Verify bản cuối failed 20261101T103503841Z-346c1783: 41/43 unit tests pass, 2 MotionLimitsTest có sẵn failed; 5 ViewerFramingTest pass. Lint/build chạy riêng pass.",
+        "2026-11-01: Device bản cuối pass 20261101T103509473Z-a93ac5b1 trên Pixel_9_Pro AVD Android 16: 20 tests, 0 failed/skipped. Gồm kéo thật Zoom/Zoom3D hết dải, GPU kiểm tra Fit/Fill/Blurred zoom âm/dương và mép thu nhỏ, xuất/đọc lại MP4 hai hướng zoom và thời lượng vòng lặp.",
+        "2026-11-01: SurfaceCoverageTest cố định zoom=0 để kiểm tra framing nền độc lập; test pan Fill vẫn yêu cầu phủ ảnh tại zoom cơ sở, thêm test riêng chứng minh zoom-out chủ động hiển thị nền. Không sửa hai test nền lỗi.",
+        "2026-11-01: Đã xem trực quan Cliffside Village khi kéo zoom âm/dương và Zoom3D bật/tắt. Ảnh .harness/zoom-in-verified.png, zoom-no-depth-verified.png; bản xử lý viền cuối tại .harness/zoom-out-final.png. Vùng lộ ra vẫn phụ thuộc inpaint hiện có; chưa xác minh cảm biến/wallpaper máy thật."
+      ]
+    },
+    {
+      "id": "ZOOM-002",
+      "title": "Bỏ Zoom 3D",
+      "status": "done",
+      "depends_on": [
+        "ZOOM-001"
+      ],
+      "acceptance": [
+        "Không còn thanh Zoom 3D trong viewer",
+        "Preview/wallpaper/export bỏ qua zoom3D của cấu hình cũ; Zoom thường tiếp tục hoạt động",
+        "Chạy Verify, Device và lint/build"
+      ],
+      "evidence": [
+        "2026-11-01: Bỏ thanh và callback Zoom 3D, bỏ uniform/phép phóng theo depth khỏi shader và tham số preview/export. Mẫu chuyển động zoom đổi nhãn thành Zoom, giữ zoom thường. zoom3D trong JSON/data model chỉ còn metadata tương thích cũ, không ảnh hưởng render dùng chung với wallpaper.",
+        "2026-11-01: Init pass 20261101T111205874Z-4cbe5101. Verify failed 20261101T111314731Z-92e0e555: 41/43 unit tests pass, 2 MotionLimitsTest lỗi nền có sẵn; lint/build chạy riêng pass.",
+        "2026-11-01: Device pass 20261101T111427964Z-65726c0d trên Pixel_9_Pro AVD Android 16: 20 tests, 0 failed/skipped. UI xác nhận không còn label/slider Zoom 3D ở Shake/Animations và kéo Zoom thường hết dải; GPU bỏ qua uniform cũ; MP4 với config zoom3D cũ chỉ có zoom thường.",
+        "2026-11-01: Device lần đầu fail compile do import test assertDoesNotExist không hợp lệ; đã bỏ import và chạy lại toàn bộ pass. git diff --check pass. Chưa kiểm tra wallpaper/cảm biến trên máy thật hoặc chụp trực quan mới trong phiên này."
+      ]
+    },
+    {
+      "id": "FIT-001",
+      "title": "Chỉ sử dụng Fit",
+      "status": "done",
+      "depends_on": [
+        "VIEWPORT-002"
+      ],
+      "acceptance": [
+        "Không còn lựa chọn Fill và Blurred background",
+        "Scene cũ và đường preview/wallpaper/export luôn dùng Fit; giữ zoom thường",
+        "Chạy Verify, Device và lint/build"
+      ],
+      "evidence": [
+        "2026-11-01: Bỏ bộ chọn Fit/Fill/Blurred background, giữ lựa chọn màu nền. Default, parse, sanitize và ghi JSON luôn FIT; scene cũ tự về FIT. Enum cũ chỉ giữ để tương thích dữ liệu/test, không xuất hiện như lựa chọn ứng dụng.",
+        "2026-11-01: Preview/wallpaper và export dùng Fit, fill factor .88; applyEffects luôn gửi scale type Fit. Legacy fitImage=false không đổi sang crop. Zoom thường vẫn được áp dụng sau framing Fit.",
+        "2026-11-01: Init pass 20261101T112705696Z-474a56dd. Verify cuối failed 20261101T112911913Z-58cf6bc2: 41/43 tests pass, hai MotionLimitsTest có sẵn; ImageFitModeTest 2/2 pass. Verify lần đầu còn fail 2 test kỳ vọng chế độ cũ, đã cập nhật đúng yêu cầu chỉ Fit rồi chạy lại.",
+        "2026-11-01: Device pass 20261101T112918389Z-c535940d, Pixel_9_Pro AVD Android 16: 20 tests, 0 failed/skipped. UI không còn Fill/Blurred background, roundtrip scene cũ về FIT, viewport/framing Fit và MP4 theo Fit pass. :app:lintDebug :app:assembleDebug pass. Chưa kiểm tra trực quan/máy thật và wallpaper trong phiên này."
+      ]
     }
   ]
 }

@@ -170,13 +170,7 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateZoom(zoom: Float) {
-        val newCfg = _currentConfig.value.copy(zoom = zoom)
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
-    }
-
-    fun updateZoom3D(zoom3D: Float) {
-        val newCfg = _currentConfig.value.copy(zoom3D = zoom3D)
+        val newCfg = _currentConfig.value.copy(zoom = zoom).sanitized()
         _currentConfig.value = newCfg
         persistConfigForWallpaper(newCfg)
     }

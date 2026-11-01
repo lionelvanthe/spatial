@@ -88,7 +88,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -98,6 +101,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.spatial.R
 import com.example.spatial.data.SpatialSceneConfig
+import com.example.spatial.data.MotionLimits
 import com.example.spatial.data.SpatialSceneItem
 import com.example.spatial.gl.SpatialGLSurfaceView
 import com.example.spatial.sensor.SpatialSensorTracker
@@ -130,7 +134,7 @@ val ALL_MOTION_PATTERNS = listOf(
     MotionPatternItem("vertical_rapid", "Rapid V", R.drawable.pattern_vertical_rapid),
     MotionPatternItem("square_cw", "Square CW", R.drawable.pattern_square_cw),
     MotionPatternItem("triangular_cw", "Triangle", R.drawable.pattern_triangular_cw),
-    MotionPatternItem("zoom", "Zoom 3D", R.drawable.ic_zoom_prop),
+    MotionPatternItem("zoom", "Zoom", R.drawable.ic_zoom_prop),
     MotionPatternItem("none", "Sensor Only", R.drawable.ic_speed)
 )
 
@@ -174,6 +178,9 @@ fun MainScreen(viewModel: SpatialViewModel) {
 
     // Bottom 4 Tabs: 0: Rotate (Rotational Tilt), 1: Shake (Jelly Physics), 2: Animations, 3: ZoomPan
     var selectedBottomTab by remember { mutableIntStateOf(0) }
+    var toolbarHeightPx by remember { mutableIntStateOf(0) }
+    var bottomBarHeightPx by remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
     var showControls by remember { mutableStateOf(false) }
     var awaitingImportedScene by remember { mutableStateOf(false) }
 
@@ -263,40 +270,56 @@ fun MainScreen(viewModel: SpatialViewModel) {
             .fillMaxSize()
             .background(Color(0xFF0F1018))
     ) {
-        // 3D OpenGL Viewport (Always active in background for zero-latency instant preview)
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                SpatialGLSurfaceView(ctx).also { view ->
+        // Fit the actual GL surface to the photo inside the space between the bars.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(
+                    top = with(density) { if (screenMode == ScreenMode.VIEWER) toolbarHeightPx.toDp() else 0.dp },
+                    bottom = with(density) { if (screenMode == ScreenMode.VIEWER) bottomBarHeightPx.toDp() else 0.dp }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            val image = currentScene?.fullImageBitmap
+            val viewportModifier = if (screenMode == ScreenMode.VIEWER && image != null) {
+                Modifier.aspectRatio(image.width.toFloat() / image.height)
+            } else {
+                Modifier.fillMaxSize()
+            }
+            AndroidView(
+                modifier = viewportModifier,
+                factory = { ctx ->
+                    SpatialGLSurfaceView(ctx).also { view ->
+                        surfaceViewRef.value = view
+                        view.renderer.activeTabMode = selectedBottomTab
+                        // Framing is scene configuration, shared with wallpaper and video export.
+                        view.onTapListener = {
+                            if (screenMode == ScreenMode.VIEWER) {
+                                showControls = !showControls
+                            }
+                        }
+                        currentScene?.let { scene ->
+                            view.renderer.setSceneData(scene.fullImageBitmap, scene.depthData, currentConfig, scene.depthWidth, scene.depthHeight)
+                        }
+                    }
+                },
+                update = { view ->
                     surfaceViewRef.value = view
                     view.renderer.activeTabMode = selectedBottomTab
-                    // Framing is scene configuration, shared with wallpaper and video export.
                     view.onTapListener = {
                         if (screenMode == ScreenMode.VIEWER) {
                             showControls = !showControls
                         }
                     }
-                    currentScene?.let { scene ->
+                    val scene = currentScene
+                    if (scene != null && (view.renderer.currentBitmap == null || view.renderer.currentBitmap != scene.fullImageBitmap)) {
                         view.renderer.setSceneData(scene.fullImageBitmap, scene.depthData, currentConfig, scene.depthWidth, scene.depthHeight)
+                    } else {
+                        view.renderer.sceneConfig = currentConfig
                     }
                 }
-            },
-            update = { view ->
-                surfaceViewRef.value = view
-                view.renderer.activeTabMode = selectedBottomTab
-                view.onTapListener = {
-                    if (screenMode == ScreenMode.VIEWER) {
-                        showControls = !showControls
-                    }
-                }
-                val scene = currentScene
-                if (scene != null && (view.renderer.currentBitmap == null || view.renderer.currentBitmap != scene.fullImageBitmap)) {
-                    view.renderer.setSceneData(scene.fullImageBitmap, scene.depthData, currentConfig, scene.depthWidth, scene.depthHeight)
-                } else {
-                    view.renderer.sceneConfig = currentConfig
-                }
-            }
-        )
+            )
+        }
 
         // SCREEN 1: GALLERY SCREEN (activity_main.xml clone)
         AnimatedVisibility(
@@ -346,6 +369,8 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 isSensorEnabled = isSensorEnabled,
                 selectedBottomTab = selectedBottomTab,
                 showControls = showControls,
+                onToolbarHeightChanged = { toolbarHeightPx = it },
+                onBottomBarHeightChanged = { bottomBarHeightPx = it },
                 onSelectBottomTab = { index ->
                     val previousTab = selectedBottomTab
                     selectedBottomTab = index
@@ -374,7 +399,6 @@ fun MainScreen(viewModel: SpatialViewModel) {
                     viewModel.updateZoom(zoomVal)
                     surfaceViewRef.value?.renderer?.touchZoom = 0.0f
                 },
-                onUpdateZoom3D = { viewModel.updateZoom3D(it) },
                 onUpdateInverted = { viewModel.updateInverted(it) },
                 onUpdateConfig = { viewModel.updateConfig(it) },
                 onReset = {
@@ -804,9 +828,9 @@ fun GalleryScreen(
 /**
  * Authentic custom Slider matching the exact Photos 3D sample app (activity_image_view.xml):
  * - Active track: #00A0E9 (@color/blue_normal)
- * - Inactive track: either solid #00A0E9 (for Trung tâm & Zoom) or light-blue #384A58 (for Cường độ, Zoom 3D, Tốc độ)
+ * - Inactive track: either solid #00A0E9 (for Trung tâm & Zoom) or light-blue #384A58 (for Cường độ, Tốc độ)
  * - Vertical bar thumb (|) in #00A0E9 (or dimmed when disabled)
- * - Supports enabled/disabled state (used for Zoom 3D when |zoom| < 0.1f)
+ * - Supports enabled/disabled state
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -909,13 +933,14 @@ fun ViewerScreen(
     onUpdateIntensity: (Float) -> Unit,
     onUpdateDepthCenter: (Float) -> Unit,
     onUpdateZoom: (Float) -> Unit,
-    onUpdateZoom3D: (Float) -> Unit,
     onUpdateInverted: (Boolean) -> Unit,
     onUpdateConfig: ((SpatialSceneConfig) -> SpatialSceneConfig) -> Unit,
     onReset: () -> Unit,
     onSetWallpaper: () -> Unit,
     onSave: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    onToolbarHeightChanged: (Int) -> Unit,
+    onBottomBarHeightChanged: (Int) -> Unit
 ) {
     Box(
         modifier = Modifier.fillMaxSize()
@@ -934,6 +959,8 @@ fun ViewerScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("viewer_toolbar")
+                    .onSizeChanged { onToolbarHeightChanged(it.height) }
                     .background(Color.Black.copy(alpha = 0.85f))
                     .statusBarsPadding()
                     .padding(horizontal = 4.dp, vertical = 2.dp),
@@ -1122,9 +1149,8 @@ fun ViewerScreen(
                             )
                         }
 
-                        // ROW 3: ZOOM (-1.0 .. 1.0, weight 3, solid blue track) & ZOOM 3D (0.0 .. 1.0, weight 2, enabled when |zoom| >= 0.1f)
+                        // Zoom uses the same limits as the saved scene configuration.
                         if (selectedBottomTab == 0 || selectedBottomTab == 2) {
-                            val isZoom3DEnabled = kotlin.math.abs(config.zoom) >= 0.1f
                             HorizontalDivider(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1132,9 +1158,6 @@ fun ViewerScreen(
                                 thickness = 0.8.dp,
                                 color = Color.White.copy(alpha = 0.15f)
                             )
-                            // Keep both controls on separate lines.  The previous 3:2 split
-                            // leaves the Zoom 3D slider with only a few pixels on compact phone
-                            // windows, which clips its label and makes the controls overlap.
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
@@ -1160,36 +1183,12 @@ fun ViewerScreen(
                                     CustomSpatialSlider(
                                         value = config.zoom,
                                         onValueChange = onUpdateZoom,
-                                        valueRange = -1.0f..1.0f,
+                                        valueRange = MotionLimits.MIN_ZOOM..MotionLimits.MAX_ZOOM,
                                         solidTrack = true,
-                                        modifier = Modifier.fillMaxWidth()
+                                        modifier = Modifier.fillMaxWidth().testTag("viewer_zoom")
                                     )
                                 }
 
-                                Spacer(modifier = Modifier.height(2.dp))
-
-                                // Zoom 3D follows on a full-width row so its thumb remains usable
-                                // on narrow phone screens.
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "Zoom 3D:",
-                                        color = if (isZoom3DEnabled) Color.White else Color.White.copy(alpha = 0.5f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    CustomSpatialSlider(
-                                        value = config.zoom3D,
-                                        onValueChange = onUpdateZoom3D,
-                                        valueRange = 0.0f..1.0f,
-                                        enabled = isZoom3DEnabled,
-                                        thinTrack = true,
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
                             }
                         }
 
@@ -1229,21 +1228,12 @@ fun ViewerScreen(
                             }
                         }
 
-                        Text("Image fitting", color = Color.White, fontSize = 12.sp)
+                        Text("Background", color = Color.White, fontSize = 12.sp)
                         Row(Modifier.fillMaxWidth()) {
-                            com.example.spatial.data.ImageFitMode.entries.forEach { mode ->
-                                TextButton(onClick = { onUpdateConfig { it.copy(imageFitMode = mode) } }, modifier = Modifier.weight(1f)) {
-                                    Text(mode.label, color = if (config.imageFitMode == mode) Color(0xFF76CFFF) else Color.White, fontSize = 10.sp)
-                                }
-                            }
-                        }
-                        if (config.imageFitMode == com.example.spatial.data.ImageFitMode.FIT) {
-                            Row(Modifier.fillMaxWidth()) {
-                                listOf("Dark" to 0xFF0F0F17.toInt(), "Black" to 0xFF000000.toInt(),
-                                    "White" to 0xFFFFFFFF.toInt(), "Blue" to 0xFF18334F.toInt()).forEach { (name, color) ->
-                                    TextButton(onClick = { onUpdateConfig { it.copy(backgroundColor = color) } }, modifier = Modifier.weight(1f)) {
-                                        Text(name, fontSize = 10.sp, color = if (config.backgroundColor == color) Color(0xFF76CFFF) else Color.White)
-                                    }
+                            listOf("Dark" to 0xFF0F0F17.toInt(), "Black" to 0xFF000000.toInt(),
+                                "White" to 0xFFFFFFFF.toInt(), "Blue" to 0xFF18334F.toInt()).forEach { (name, color) ->
+                                TextButton(onClick = { onUpdateConfig { it.copy(backgroundColor = color) } }, modifier = Modifier.weight(1f)) {
+                                    Text(name, fontSize = 10.sp, color = if (config.backgroundColor == color) Color(0xFF76CFFF) else Color.White)
                                 }
                             }
                         }
@@ -1335,6 +1325,8 @@ fun ViewerScreen(
                 color = Color(0xFF15171C),
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("viewer_bottom_bar")
+                    .onSizeChanged { onBottomBarHeightChanged(it.height) }
                     .navigationBarsPadding()
             ) {
                 Row(

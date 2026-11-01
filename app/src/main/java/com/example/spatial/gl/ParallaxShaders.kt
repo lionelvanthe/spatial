@@ -14,7 +14,7 @@ import com.example.spatial.data.SpatialSceneConfig
 internal object ParallaxShaders {
     /** Sets the look uniforms (blur, vignette, colour grade) of [program], which must be in use. */
     fun applyEffects(program: Int, config: SpatialSceneConfig) {
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uScaleType"), config.imageFitMode.shaderValue)
+        GLES20.glUniform1f(GLES20.glGetUniformLocation(program, "uScaleType"), 0f)
         val color = config.backgroundColor
         GLES20.glUniform4f(GLES20.glGetUniformLocation(program, "uBgColor"),
             ((color shr 16) and 255) / 255f, ((color shr 8) and 255) / 255f,
@@ -56,7 +56,6 @@ internal object ParallaxShaders {
         uniform float uFill;         // share of the screen the photo takes
         uniform float uZoom;         // user zoom
         uniform vec2 uPan;           // pan, in image widths / heights
-        uniform float uZoom3D;       // how much near surfaces are magnified
         uniform float uStrength;     // 0 = show the untouched photo
         uniform float uBlur;         // depth-of-field strength, 0 = off
         uniform float uVignette;     // edge darkening, 0 = off
@@ -72,15 +71,30 @@ internal object ParallaxShaders {
         ${ImageFraming.GLSL}
 
         // The ray-marched foreground composed over the pre-filled background.
+        float insidePhoto(vec2 uv) {
+            return step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
+        }
+
         vec4 compose(vec2 foregroundUV, vec2 backgroundUV, float visible) {
             vec4 foreground = texture2D(image, foregroundUV);
-            vec4 background = texture2D(uInpaint, backgroundUV);
-            return mix(background, foreground, texture2D(uForegroundMask, foregroundUV).a * visible);
+            vec4 background;
+            if (insidePhoto(backgroundUV) > 0.5) {
+                background = texture2D(uInpaint, backgroundUV);
+            } else {
+                background = uScaleType > 1.5 ? blurredBackdrop(v_TexCoord) : uBgColor;
+            }
+            return mix(background, foreground,
+                texture2D(uForegroundMask, foregroundUV).a * visible * insidePhoto(foregroundUV));
         }
 
         float rayLimit(float origin, float travel) {
             return travel > 0.0 ? (1.0 - origin) / max(travel, 0.000001)
                                 : origin / max(-travel, 0.000001);
+        }
+
+        vec2 projectDepth(vec2 uv, vec2 parallax, float depth) {
+            float relativeDepth = depth - uNeutral;
+            return uv - parallax * relativeDepth;
         }
 
         void main() {
@@ -121,13 +135,11 @@ internal object ParallaxShaders {
                 backgroundUV = uv;
                 for (int j = 0; j < 4; j++) {
                     float farDepth = texture2D(uDepthMap, backgroundUV).g;
-                    backgroundUV = uv - parallax * (farDepth - uNeutral);
+                    backgroundUV = projectDepth(uv, parallax, farDepth);
                 }
                 float stepDepth = 1.0 / float(STEPS);
-                vec2 delta = parallax / float(STEPS);
-                vec2 currentUV = uv - parallax * (1.0 - uNeutral);
+                vec2 currentUV = projectDepth(uv, parallax, 1.0);
                 float currentLayerDepth = 1.0;
-                float hitDepth = 0.0;
                 bool intersected = false;
                 float previousSample = texture2D(uDepthMap, currentUV).b;
                 float previousGap = 1.0 - previousSample;
@@ -152,7 +164,7 @@ internal object ParallaxShaders {
                                 min(abs(currentLayerDepth - low), abs(currentLayerDepth - high)) > stepDepth;
                         }
                         if (!wall && (uLayered > 0.5 || abs(depthMapVal - previousSample) <= 0.12)) {
-                            vec2 beforeUV = currentUV - delta;
+                            vec2 beforeUV = projectDepth(uv, parallax, currentLayerDepth + stepDepth);
                             float beforeDepth = currentLayerDepth + stepDepth;
                             if (i > 0) {
                                 for (int j = 0; j < 5; j++) {
@@ -168,26 +180,21 @@ internal object ParallaxShaders {
                                 }
                             }
                             finalUV = currentUV;
-                            hitDepth = currentLayerDepth;
                             intersected = true;
                             break;
                         }
                     }
                     previousSample = depthMapVal;
                     previousGap = gap;
-                    currentUV += delta;
                     currentLayerDepth -= stepDepth;
+                    currentUV = projectDepth(uv, parallax, currentLayerDepth);
                 }
                 if (!intersected) {
                     // No RGB surface was visible on this ray. Use the filled far layer, not
                     // a foreground texel stretched across the rejected depth wall.
-                    finalUV = uv + parallax * uNeutral;
+                    finalUV = projectDepth(uv, parallax, 0.0);
                     hasSurface = 0.0;
-                    hitDepth = 0.0;
                 }
-                // 3D zoom: surfaces in front of the still plane are magnified about the centre.
-                float zoom3d = 1.0 + uZoom3D * max(hitDepth - uNeutral, 0.0);
-                finalUV = (finalUV - 0.5) / zoom3d + 0.5;
             }
             // The source photo cannot contain pixels hidden behind a foreground object.  Sampling
             // it directly at a newly exposed coordinate creates a bright copy of the silhouette.

@@ -41,7 +41,7 @@ class SurfaceCoverageTest {
                 if (surface == null) Thread.sleep(50)
             }
             val view = requireNotNull(surface) { "MainScreen must contain the real GLSurfaceView" }
-            assertFalse("Preview must select the existing Fill mode", view.renderer.fitImage)
+            assertTrue("Preview must always use Fit", view.renderer.fitImage)
             var measuredWidth = 0; var measuredHeight = 0
             scenario.onActivity { measuredWidth = view.width; measuredHeight = view.height }
             assertTrue(measuredWidth > 0 && measuredHeight > 0)
@@ -66,7 +66,7 @@ class SurfaceCoverageTest {
             val renderer = SpatialGLRenderer(app)
             renderer.onSurfaceCreated(null, null)
             renderer.fitImage = true
-            renderer.setSceneData(scene.fullImageBitmap, scene.depthData, scene.config, scene.depthWidth, scene.depthHeight)
+            renderer.setSceneData(scene.fullImageBitmap, scene.depthData, scene.config.copy(zoom = 0f, zoom3D = 0f), scene.depthWidth, scene.depthHeight)
             val mesh = renderer.javaClass.getDeclaredField("rayMarchMesh").apply { isAccessible = true }.get(renderer) as SpatialMesh
             for ((width, height) in listOf(403 to 637, 403 to 594, 637 to 403, 403 to 637)) {
                 renderer.fitImage = true
@@ -125,7 +125,7 @@ class SurfaceCoverageTest {
                 copyUniforms(production, diagnostic)
                 val c = draw(diagnostic, 0f, "C_zero_compositor")
                 val d = draw(production, 1f, "D_parallax")
-                val expected = maxOf(0f, (width - height * (1024f / 1700) * minOf(.88f * 1.21f, 1f)) / 2).roundToInt()
+                val expected = maxOf(0f, (width - height * (1024f / 1700) * .88f) / 2).roundToInt()
                 assertTrue("Framing must be centered", abs(borders(b).first - borders(b).second) <= 1)
                 for ((name, pixels) in listOf("B" to b, "C" to c, "D" to d)) {
                     val edges = borders(pixels)
@@ -146,50 +146,22 @@ class SurfaceCoverageTest {
                 val legacy = gpu.createProgram(legacySource)
                 copyUniforms(production, legacy)
                 GLES20.glUseProgram(legacy)
-                GLES20.glUniform1f(GLES20.glGetUniformLocation(legacy, "uZoom"), 1f / .88f)
+                GLES20.glUniform1f(GLES20.glGetUniformLocation(legacy, "uZoom"), 1f)
                 assertEquals(borders(b), borders(draw(legacy, 0f, "legacy_zero_fit")))
 
-                // Minimal preview fix: select the existing Crop/Fill mode; no offsets or
-                // changed ray math. Every diagnostic path must now cover the entire surface.
+                // Old callers cannot switch the app back to Fill.
                 renderer.fitImage = false
+                assertTrue(renderer.fitImage)
                 renderer.onDrawFrame(null)
-                val cropB = draw(production, 0f, "after_B_zero_crop")
-                copyUniforms(production, diagnostic)
-                val cropC = draw(diagnostic, 0f, "after_C_compositor_crop")
-                val cropD = draw(production, 1f, "after_D_parallax_crop")
-                copyUniforms(production, reference)
-                val cropOriginal = draw(reference, 0f, "after_A_original_crop")
-                assertArrayEquals("Crop mode must preserve correctly projected original RGB", cropB, cropOriginal)
-                // Independently project screen pixel centres through the geometric cover scale,
-                // then compare source RGB. This catches offsets/double transforms shared by paths.
-                val image = scene.fullImageBitmap!!
-                val scale = maxOf(width.toFloat() / image.width, height.toFloat() / image.height) * 1.21f
-                for (y in listOf(0, 1, height / 2, height - 2, height - 1)) {
-                    for (x in listOf(0, 1, 11, width / 2, width - 12, width - 2, width - 1)) {
-                        val sx = ((x + .5f - width / 2f) / scale + image.width / 2f - .5f).coerceIn(0f, (image.width - 1).toFloat())
-                        val sy = ((y + .5f - height / 2f) / scale + image.height / 2f - .5f).coerceIn(0f, (image.height - 1).toFloat())
-                        val x0 = sx.toInt(); val y0 = sy.toInt()
-                        val x1 = minOf(x0 + 1, image.width - 1); val y1 = minOf(y0 + 1, image.height - 1)
-                        for (shift in listOf(0, 8, 16)) {
-                            fun channel(xx: Int, yy: Int) = (image.getPixel(xx, yy) shr shift) and 255
-                            val fx = sx - x0; val fy = sy - y0
-                            val expectedChannel = ((channel(x0, y0) * (1 - fx) + channel(x1, y0) * fx) * (1 - fy) +
-                                (channel(x0, y1) * (1 - fx) + channel(x1, y1) * fx) * fy).roundToInt()
-                            val actualChannel = (cropB[y * width + x] shr shift) and 255
-                            assertTrue("Original RGB projection at $x,$y", abs(expectedChannel - actualChannel) <= 2)
-                        }
-                    }
-                }
-                for (pixels in listOf(cropB, cropC, cropD, cropOriginal)) {
-                    assertEquals("Crop must not paint side bars", 0 to 0, borders(pixels))
-                }
+                val fitAgain = draw(production, 0f, "after_legacy_fill_request")
+                assertArrayEquals("Legacy Fill requests must preserve Fit framing", b, fitAgain)
                 renderer.activeTabMode = 2
                 renderer.onDrawFrame(null)
                 val anim = gpu.capture("strip_${width}x${height}_after_Animations")
-                assertEquals(0 to 0, borders(anim))
+                assertEquals(borders(d), borders(anim))
                 assertFalse(anim.any { it == Color.MAGENTA })
                 renderer.activeTabMode = 0
-                report.append("${width}x$height AFTER crop A/B/C/D/Animations left=0 right=0 clearExposed=0 originalRgbExact=true\n")
+                report.append("${width}x$height AFTER legacy Fill request remains Fit; Animations borders match Fit; clearExposed=0\n")
             }
         }
         val dir = File(app.cacheDir, "parallax-validation").apply { mkdirs() }

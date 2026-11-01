@@ -12,10 +12,11 @@ internal object ImageFraming {
 
         vec2 photoUV(vec2 screenUV) {
             bool crop = uScaleType > 0.5 && uScaleType < 1.5;
-            float scale = crop ? max(uFill * uZoom, 1.0) : min(uFill * uZoom, 1.0);
+            // Fit/Fill choose the base framing; user zoom must remain effective in both directions.
+            float baseScale = crop ? max(uFill, 1.0) : min(uFill, 1.0);
+            float scale = baseScale * uZoom;
             vec2 uv = (aspectUV(screenUV, crop ? 1.0 : 0.0) - 0.5) / max(scale, 0.0001) + 0.5;
-            // Fit modes retain the complete photo. Fill permits pan only within its crop,
-            // so a gesture cannot accidentally expose empty space.
+            // Pan stays within the available crop; explicit zoom-out may reveal the background.
             if (crop) {
                 vec2 span = (aspectUV(vec2(1.0), 1.0) - 0.5) * 2.0 / scale;
                 vec2 allowance = max((1.0 - span) * 0.5, vec2(0.0));
