@@ -50,6 +50,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     // Current scene & texture updates
     var currentBitmap: Bitmap? = null
         private set
+    // Called on the GL thread after the first frame of a newly uploaded bitmap has been drawn.
+    @Volatile
+    var onSceneDrawn: ((Bitmap) -> Unit)? = null
+    private var undrawnBitmap: Bitmap? = null
     private var currentDepthMap: ByteArray? = null
     private var currentDepthWidth = 504
     private var currentDepthHeight = 504
@@ -258,6 +262,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             if (inpaint !== bmp) inpaint.recycle()
             foregroundMask.recycle()
             hasTexture = true
+            undrawnBitmap = bmp
             Log.d("SpatialGLRenderer", "Ray-march depth textures loaded: ${bmp.width}x${bmp.height}")
         }
         if (programHandle == 0 || !hasTexture) return
@@ -415,6 +420,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glUniform1f(uStrengthHandle, if (activeTabMode == 3) 0.0f else 1.0f)
         ParallaxShaders.applyEffects(programHandle, sceneConfig)
         rayMarchMesh.draw(aPositionHandle, aTextureSTHandle)
+        undrawnBitmap?.let { drawn ->
+            undrawnBitmap = null
+            onSceneDrawn?.invoke(drawn)
+        }
     }
     companion object {
         // Max sideways eye travel (world units) at full tilt.

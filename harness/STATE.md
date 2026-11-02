@@ -1,7 +1,9 @@
 # Bàn giao hiện tại
 
 - Ngày: 2026-11-02 (Asia/Saigon).
-- Phạm vi: `TABS-002` ("Bỏ tab cuối (ZoomPan) khỏi thanh tab dưới") `done`, chưa commit. Trước đó `BGUI-001` (commit dc3adf0), `INTENSITY-001` và `EDGES-002` (commit 7980a5c) `done`. Không còn mục `in_progress`.
+- Phạm vi: `LOADING-001` ("Hiển thị loading khi chọn ảnh mới thay vì ảnh cũ") `done`, chưa commit. Trước đó `TABS-002` (92d7820), `BGUI-001` (dc3adf0), `INTENSITY-001`/`EDGES-002` (7980a5c) `done`. Không còn mục `in_progress`.
+- LOADING-001: `SpatialViewModel.isLoadingScene` + `SpatialGLRenderer.onSceneDrawn`; `MainScreen` che viewport bằng loader tới khi renderer vẽ xong frame đầu của ảnh mới. Test mới `SceneLoadingTest`. Verify pass `.harness/runs/20261102T045454966Z-abb1f285/result.json`; Device pass `.harness/runs/20261102T050028349Z-136a8c72/result.json` (23/23). Chưa xem trực quan.
+- Lưu ý: `ZoomExportTest` treo không ổn định trên emulator Android 9 này (đã gặp 2 lần), chạy lại thì pass.
 - TABS-002: gỡ tab ZoomPan trong `MainScreen.kt` (danh sách tab, nhánh index 3, điều kiện `!= 3` ở toolbar/bảng thông số). Code chế độ 3 trong `SpatialGLRenderer`/`ViewerFraming` và drawable `ic_zoom_pan_tab` vẫn còn nhưng không dùng từ UI. Verify pass `.harness/runs/20261102T045038593Z-b2745729/result.json`; Device pass `.harness/runs/20261102T045101442Z-9f8453ab/result.json` (22/22). Chưa xem trực quan.
 - BGUI-001: gỡ hàng nút Background (Dark/Black/White/Blue) trong `MainScreen.kt`. Giữ `SpatialSceneConfig.backgroundColor` để đọc scene cũ; scene đã lưu màu khác mặc định vẫn dùng màu đó nhưng không còn UI để đổi. Verify pass `.harness/runs/20261102T044027701Z-89d61602/result.json`; Device pass `.harness/runs/20261102T044109139Z-3652e8ab/result.json` (22/22). Chưa xem trực quan.
 - Nguyên nhân INTENSITY-001: `intensity` trong `_desc.dat` là tham số Photos 3D thang 0..1.25 (ảnh mẫu 0.42-0.98; native `depthScale = 0.30 + 0.70 * i^3`, xem `PROGRESS.md`). Code kẹp về `MotionLimits.MAX_INTENSITY = 0.15` và render tuyến tính `0.045 + 0.115 * i`, nên slider 0..1.25 gần như vô tác dụng và mọi ảnh mẫu luôn ở max.

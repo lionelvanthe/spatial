@@ -91,6 +91,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -146,6 +148,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
     val scenes by viewModel.scenes.collectAsState()
     val isSensorEnabled by viewModel.isSensorEnabled.collectAsState()
     val isProcessing by viewModel.isProcessing.collectAsState()
+    val isLoadingScene by viewModel.isLoadingScene.collectAsState()
     val processProgress by viewModel.processProgress.collectAsState()
     val isExporting by viewModel.isExporting.collectAsState()
     val exportProgress by viewModel.exportProgress.collectAsState()
@@ -184,6 +187,10 @@ fun MainScreen(viewModel: SpatialViewModel) {
     var awaitingImportedScene by remember { mutableStateOf(false) }
 
     val surfaceViewRef = remember { mutableStateOf<SpatialGLSurfaceView?>(null) }
+    // Last bitmap the renderer has actually drawn; until it matches the scene, the old one is on screen.
+    var drawnBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    val sceneLoading = isLoadingScene ||
+        currentScene?.fullImageBitmap.let { it != null && it !== drawnBitmap }
 
     // Handle back button when in viewer (matches rk0.x() in sample app)
     BackHandler(enabled = screenMode == ScreenMode.VIEWER) {
@@ -290,6 +297,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 factory = { ctx ->
                     SpatialGLSurfaceView(ctx).also { view ->
                         surfaceViewRef.value = view
+                        view.renderer.onSceneDrawn = { bitmap -> view.post { drawnBitmap = bitmap } }
                         view.renderer.activeTabMode = selectedBottomTab
                         // Framing is scene configuration, shared with wallpaper and video export.
                         view.onTapListener = {
@@ -318,6 +326,17 @@ fun MainScreen(viewModel: SpatialViewModel) {
                     }
                 }
             )
+            if (screenMode == ScreenMode.VIEWER && sceneLoading) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color(0xFF0F1018))
+                        .semantics { contentDescription = "Loading scene" },
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF00A0E9))
+                }
+            }
         }
 
         // SCREEN 1: GALLERY SCREEN (activity_main.xml clone)

@@ -54,6 +54,13 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
     private val _currentConfig = MutableStateFlow(SpatialSceneConfig())
     val currentConfig: StateFlow<SpatialSceneConfig> = _currentConfig.asStateFlow()
 
+    // True from a scene selection until its full image and depth have been published.
+    private val _isLoadingScene = MutableStateFlow(false)
+    val isLoadingScene: StateFlow<Boolean> = _isLoadingScene.asStateFlow()
+    private var sceneJob: Job? = null
+    @Volatile
+    private var sceneRequest = 0
+
     private val _isSensorEnabled = MutableStateFlow(true)
     val isSensorEnabled: StateFlow<Boolean> = _isSensorEnabled.asStateFlow()
 
@@ -94,15 +101,22 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectScene(item: SpatialSceneItem) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val fullItem = if (!item.isCustom) {
-                AssetDataLoader.loadSceneFullData(getApplication(), item)
-            } else {
-                item
+        sceneJob?.cancel()
+        val request = ++sceneRequest
+        _isLoadingScene.value = true
+        sceneJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val fullItem = if (!item.isCustom) {
+                    AssetDataLoader.loadSceneFullData(getApplication(), item)
+                } else {
+                    item
+                }
+                _currentScene.value = fullItem
+                _currentConfig.value = fullItem.config
+                persistCurrentSceneForWallpaper(fullItem, fullItem.config)
+            } finally {
+                if (request == sceneRequest) _isLoadingScene.value = false
             }
-            _currentScene.value = fullItem
-            _currentConfig.value = fullItem.config
-            persistCurrentSceneForWallpaper(fullItem, fullItem.config)
         }
     }
 

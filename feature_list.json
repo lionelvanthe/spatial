@@ -254,6 +254,22 @@
         "2026-11-02: MainScreen.kt: bỏ ZoomPan khỏi danh sách tab và nhánh xử lý index 3; bỏ điều kiện selectedBottomTab != 3 ở toolbar và bảng thông số (giờ luôn đúng). Giữ code chế độ 3 trong SpatialGLRenderer/ViewerFraming (UI không còn vào được) và drawable ic_zoom_pan_tab. ViewerViewportLayoutTest: bỏ ZoomPan khỏi vòng tab, thêm assert ZoomPan không tồn tại.",
         "2026-11-02: Verify pass 20261102T045038593Z-b2745729 (unit test, lintDebug, assembleDebug). Device pass 20261102T045101442Z-9f8453ab trên PGT-AN10 Android 9: 22/22. Chưa xem trực quan thanh tab."
       ]
+    },
+    {
+      "id": "LOADING-001",
+      "title": "Hiển thị loading khi chọn ảnh mới thay vì ảnh cũ",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Từ lúc chọn ảnh tới khi renderer vẽ xong frame đầu của ảnh mới, viewport hiện loading thay vì ảnh cũ",
+        "Toolbar và thanh tab vẫn hiển thị; loading tự tắt khi ảnh mới đã vẽ",
+        "Chọn ảnh liên tiếp không làm kẹt loading; chạy Verify và Device"
+      ],
+      "evidence": [
+        "2026-11-02: SpatialViewModel.isLoadingScene bật ngay khi selectScene và tắt khi scene mới đã publish (token request chống race khi chọn liên tiếp; job cũ bị huỷ). SpatialGLRenderer.onSceneDrawn gọi sau frame đầu tiên của bitmap mới upload. MainScreen che viewport bằng nền tối + CircularProgressIndicator (contentDescription \"Loading scene\") khi isLoadingScene hoặc bitmap đã vẽ khác currentScene.fullImageBitmap; toolbar và thanh tab vẫn hiển thị. Áp dụng cả ảnh mẫu lẫn ảnh tự thêm.",
+        "2026-11-02: Test mới SceneLoadingTest.loadingCoversTheOldSceneUntilTheNewOneIsDrawn: mở Cliffside, chờ loader tắt và renderer vẽ đúng bitmap; tạm dừng GL view, chọn scene mới, loader phải hiện; resume, loader tắt và renderer dùng bitmap mới.",
+        "2026-11-02: Verify pass 20261102T045454966Z-abb1f285 (unit test, lintDebug, assembleDebug). Device lượt 1 treo ở ZoomExportTest (encoder emulator, lỗi đã gặp trước), SceneLoadingTest đã pass trong lượt đó; dừng và chạy lại pass 20261102T050028349Z-136a8c72 trên PGT-AN10 Android 9: 23/23. Chưa xem trực quan."
+      ]
     }
   ]
 }
