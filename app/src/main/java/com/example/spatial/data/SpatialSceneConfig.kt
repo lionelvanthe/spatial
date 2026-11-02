@@ -21,6 +21,23 @@ object MotionLimits {
     const val MIN_ZOOM = -0.35f
     const val MAX_ZOOM = 0.35f
     const val MAX_ZOOM_3D = 0.35f
+    const val DEFAULT_ELASTICITY = 0.5f
+    const val MIN_ELASTICITY = 0.0f
+    const val MAX_ELASTICITY = 1.0f
+
+    fun springK(elasticity: Float): Float {
+        val e = elasticity.coerceIn(MIN_ELASTICITY, MAX_ELASTICITY)
+        return 30.0f + e * 70.0f
+    }
+
+    fun dampC(elasticity: Float): Float {
+        val e = elasticity.coerceIn(MIN_ELASTICITY, MAX_ELASTICITY)
+        return if (e <= 0.5f) {
+            9.0f - (e / 0.5f) * (9.0f - 2.8f)
+        } else {
+            2.8f - ((e - 0.5f) / 0.5f) * (2.8f - 0.8f)
+        }
+    }
 }
 
 data class SpatialSceneConfig(
@@ -30,6 +47,7 @@ data class SpatialSceneConfig(
     val speed: Float = 0.35f,
     val zoom: Float = 0.0f,             // 2D/3D image zoom (-1.0 to 1.0)
     val zoom3D: Float = 0.0f,           // Legacy metadata only; no longer used for rendering.
+    val elasticity: Float = MotionLimits.DEFAULT_ELASTICITY, // Jelly bounce/elasticity (0.0 to 1.0)
     val rInverted: Boolean = false,     // Invert gyro / motion
     val wallTargetX: Float = 0.5f,
     val wallTargetY: Float = 0.5f,
@@ -52,6 +70,7 @@ data class SpatialSceneConfig(
         speed = speed.finiteOr(0.35f).coerceIn(0f, 1f),
         zoom = zoom.finiteOr(0f).coerceIn(MotionLimits.MIN_ZOOM, MotionLimits.MAX_ZOOM),
         zoom3D = zoom3D.finiteOr(0f).coerceIn(0f, MotionLimits.MAX_ZOOM_3D),
+        elasticity = elasticity.finiteOr(MotionLimits.DEFAULT_ELASTICITY).coerceIn(MotionLimits.MIN_ELASTICITY, MotionLimits.MAX_ELASTICITY),
         vignette = vignette.finiteOr(0f).coerceIn(0f, 1f),
         blur = blur.finiteOr(0f).coerceIn(0f, 1f),
         saturation = saturation.finiteOr(1f).coerceIn(0f, 2f),
@@ -72,6 +91,7 @@ data class SpatialSceneConfig(
         obj.put("speed", speed.toDouble())
         obj.put("zoom", zoom.toDouble())
         obj.put("zoom3D", zoom3D.toDouble())
+        obj.put("elasticity", elasticity.toDouble())
         obj.put("rInverted", rInverted)
         obj.put("wallTargetX", wallTargetX.toDouble())
         obj.put("wallTargetY", wallTargetY.toDouble())
@@ -100,6 +120,7 @@ data class SpatialSceneConfig(
                     speed = obj.optDouble("speed", 0.35).toFloat(),
                     zoom = obj.optDouble("zoom", 0.0).toFloat(),
                     zoom3D = obj.optDouble("zoom3D", 0.0).toFloat(),
+                    elasticity = obj.optDouble("elasticity", MotionLimits.DEFAULT_ELASTICITY.toDouble()).toFloat(),
                     rInverted = obj.optBoolean("rInverted", false),
                     wallTargetX = obj.optDouble("wallTargetX", 0.5).toFloat(),
                     wallTargetY = obj.optDouble("wallTargetY", 0.5).toFloat(),

@@ -66,4 +66,27 @@ class MotionLimitsTest {
         assertTrue(DepthProjection.depthHeight(d.intensity) <= .5f * DepthProjection.MAX_DEPTH_HEIGHT)
         assertEquals(d, d.sanitized())
     }
+
+    @Test fun elasticityValuesAreClamped() {
+        val c = SpatialSceneConfig(elasticity = -2f).sanitized()
+        assertEquals(MotionLimits.MIN_ELASTICITY, c.elasticity, 0f)
+        val c2 = SpatialSceneConfig(elasticity = 5f).sanitized()
+        assertEquals(MotionLimits.MAX_ELASTICITY, c2.elasticity, 0f)
+        val c3 = SpatialSceneConfig(elasticity = Float.NaN).sanitized()
+        assertEquals(MotionLimits.DEFAULT_ELASTICITY, c3.elasticity, 0f)
+    }
+
+    @Test fun elasticityControlsSpringKAndDampC() {
+        assertEquals(65.0f, MotionLimits.springK(0.5f), 1e-5f)
+        assertEquals(2.8f, MotionLimits.dampC(0.5f), 1e-5f)
+        assertEquals(30.0f, MotionLimits.springK(0.0f), 1e-5f)
+        assertEquals(9.0f, MotionLimits.dampC(0.0f), 1e-5f)
+        assertEquals(100.0f, MotionLimits.springK(1.0f), 1e-5f)
+        assertEquals(0.8f, MotionLimits.dampC(1.0f), 1e-5f)
+
+        // springK monotonically increases with elasticity
+        assertTrue(MotionLimits.springK(0.2f) < MotionLimits.springK(0.8f))
+        // dampC monotonically decreases with elasticity (less damping = bouncier)
+        assertTrue(MotionLimits.dampC(0.2f) > MotionLimits.dampC(0.8f))
+    }
 }

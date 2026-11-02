@@ -306,6 +306,25 @@
         "2026-11-02: Thêm unit test allMotionPatternsExcludesNone trong LoopPlanTest khẳng định ALL_MOTION_PATTERNS không chứa id none.",
         "2026-11-02: Verify pass .harness/runs/20261102T064124306Z-a89fd6f2/result.json (49 unit tests JVM, lintDebug, assembleDebug). Device pass .harness/runs/20261102T064238181Z-e2023c9d/result.json trên emulator-5554 Android 9 (23/23 tests pass, 0 failed, 0 skipped)."
       ]
+    },
+    {
+      "id": "TABS-003",
+      "title": "Bổ sung độ đàn hồi và tùy chỉnh (isometric, dolly, zoom, look) cho tab thứ 2",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Tab thứ 2 (Shake / Jelly) hiển thị thanh trượt Độ đàn hồi (0.0..1.0, mặc định 0.5) trong bảng Tune",
+        "Tab thứ 2 hiển thị thanh trượt Zoom và nhóm Look (Isometric, Dolly, Blur, Vignette, Saturation, Contrast, Brightness, Sepia) giống 2 tab còn lại",
+        "SpatialSceneConfig hỗ trợ elasticity với giá trị an toàn, serialization JSON và tích hợp vào mô phỏng dao động Jelly trong SpatialGLRenderer",
+        "Unit test kiểm tra elasticity và các tùy chỉnh; chạy Verify và Device pass"
+      ],
+      "evidence": [
+        "2026-11-02: Đã thêm thông số elasticity (0.0..1.0, mặc định 0.5) vào MotionLimits và SpatialSceneConfig (hỗ trợ sanitized, toJson, fromJson).",
+        "2026-11-02: MotionLimits.springK(elasticity) và MotionLimits.dampC(elasticity) tính độ cứng lò xo và độ cản dịu dao động Jelly (mặc định 0.5f giữ nguyên springK 65.0f và dampC 2.8f); SpatialGLRenderer tích hợp vào ODE dao động Jelly và vận tốc búng tay onTouchUp.",
+        "2026-11-02: MainScreen.kt: mở rộng điều kiện hiển thị Zoom và nhóm Look (Isometric, Dolly, Blur, Vignette, Saturation, Contrast, Brightness, Sepia) thành selectedBottomTab in 0..2 (hiển thị trên cả 3 tab); bổ sung thanh trượt 'Độ đàn hồi:' riêng cho tab thứ 2 (Shake / Jelly mode).",
+        "2026-11-02: Thêm unit test elasticityValuesAreClamped và elasticityControlsSpringKAndDampC trong MotionLimitsTest; thêm instrumented test tab2HasElasticityZoomAndLookControls trong ZoomControlsTest kiểm tra sự tồn tại và thao tác thanh trượt trên cả 3 tab.",
+        "2026-11-02: Verify pass .harness/runs/20261102T070216287Z-9a00ef46/result.json (51 unit tests JVM, lintDebug, assembleDebug). Device pass .harness/runs/20261102T070420154Z-e263825c/result.json trên emulator-5554 Android 9 (24/24 connected instrumentation tests passed, 0 failed, 0 skipped)."
+      ]
     }
   ]
 }

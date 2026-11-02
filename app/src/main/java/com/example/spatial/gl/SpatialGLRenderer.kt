@@ -8,6 +8,7 @@ import android.opengl.GLUtils
 import android.opengl.Matrix
 import android.os.SystemClock
 import android.util.Log
+import com.example.spatial.data.MotionLimits
 import com.example.spatial.data.SpatialSceneConfig
 import java.util.concurrent.atomic.AtomicReference
 import javax.microedition.khronos.egl.EGLConfig
@@ -128,8 +129,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         isTouching = false
         if (activeTabMode == 1) {
             // Impart release flick velocity into the mass-spring jelly oscillator
-            jellyVelocityX = (releaseVx * 2.2f).coerceIn(-18.0f, 18.0f)
-            jellyVelocityY = (releaseVy * 2.2f).coerceIn(-18.0f, 18.0f)
+            val e = sceneConfig.elasticity.coerceIn(MotionLimits.MIN_ELASTICITY, MotionLimits.MAX_ELASTICITY)
+            val velFactor = 1.2f + 2.0f * e
+            jellyVelocityX = (releaseVx * velFactor).coerceIn(-18.0f, 18.0f)
+            jellyVelocityY = (releaseVy * velFactor).coerceIn(-18.0f, 18.0f)
         }
     }
     /**
@@ -288,8 +291,8 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             // Tab 1: Authentic Jelly / Jello Physics Simulation
             if (!isTouching) {
                 // Mass-spring-damper harmonic ODE: F = -k * pos - c * vel
-                val springK = 65.0f
-                val dampC = 2.8f
+                val springK = MotionLimits.springK(sceneConfig.elasticity)
+                val dampC = MotionLimits.dampC(sceneConfig.elasticity)
                 val forceX = -jellyDisplacementX * springK - jellyVelocityX * dampC
                 val forceY = -jellyDisplacementY * springK - jellyVelocityY * dampC
                 jellyVelocityX += forceX * dt

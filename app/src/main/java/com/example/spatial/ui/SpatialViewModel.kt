@@ -184,6 +184,12 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
         persistConfigForWallpaper(newCfg)
     }
 
+    fun updateElasticity(elasticity: Float) {
+        val newCfg = _currentConfig.value.copy(elasticity = elasticity).sanitized()
+        _currentConfig.value = newCfg
+        persistConfigForWallpaper(newCfg)
+    }
+
     fun updateZoom(zoom: Float) {
         val newCfg = _currentConfig.value.copy(zoom = zoom).sanitized()
         _currentConfig.value = newCfg

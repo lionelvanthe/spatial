@@ -412,6 +412,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 onUpdateSpeed = { viewModel.updateSpeed(it) },
                 onUpdateIntensity = { viewModel.updateIntensity(it) },
                 onUpdateDepthCenter = { viewModel.updateDepthCenter(it) },
+                onUpdateElasticity = { viewModel.updateElasticity(it) },
                 onUpdateZoom = { zoomVal ->
                     viewModel.updateZoom(zoomVal)
                     surfaceViewRef.value?.renderer?.touchZoom = 0.0f
@@ -949,6 +950,7 @@ fun ViewerScreen(
     onUpdateSpeed: (Float) -> Unit,
     onUpdateIntensity: (Float) -> Unit,
     onUpdateDepthCenter: (Float) -> Unit,
+    onUpdateElasticity: (Float) -> Unit,
     onUpdateZoom: (Float) -> Unit,
     onUpdateInverted: (Boolean) -> Unit,
     onUpdateConfig: ((SpatialSceneConfig) -> SpatialSceneConfig) -> Unit,
@@ -1165,7 +1167,7 @@ fun ViewerScreen(
                         }
 
                         // Zoom uses the same limits as the saved scene configuration.
-                        if (selectedBottomTab == 0 || selectedBottomTab == 2) {
+                        if (selectedBottomTab in 0..2) {
                             HorizontalDivider(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1207,7 +1209,43 @@ fun ViewerScreen(
                             }
                         }
 
-                        // ROW 4: TỐC ĐỘ (Speed: 0.0 .. 1.0) - Visible ONLY when Animations Tab (Tab 2) is active
+                        // ROW 4: ĐỘ ĐÀN HỒI (Elasticity: 0.0 .. 1.0) - Visible ONLY when Tab 1 (Shake / Jelly) is active
+                        if (selectedBottomTab == 1) {
+                            HorizontalDivider(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                thickness = 0.8.dp,
+                                color = Color.White.copy(alpha = 0.15f)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_shake_tab),
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Độ đàn hồi:",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                CustomSpatialSlider(
+                                    value = config.elasticity,
+                                    onValueChange = onUpdateElasticity,
+                                    valueRange = MotionLimits.MIN_ELASTICITY..MotionLimits.MAX_ELASTICITY,
+                                    modifier = Modifier.fillMaxWidth().testTag("viewer_elasticity")
+                                )
+                            }
+                        }
+
+                        // ROW 5: TỐC ĐỘ (Speed: 0.0 .. 1.0) - Visible ONLY when Animations Tab (Tab 2) is active
                         if (selectedBottomTab == 2) {
                             HorizontalDivider(
                                 modifier = Modifier
@@ -1244,7 +1282,7 @@ fun ViewerScreen(
                         }
 
                         // LOOK: depth blur, vignette and colour grade (not part of the original app)
-                        if (selectedBottomTab == 0 || selectedBottomTab == 2) {
+                        if (selectedBottomTab in 0..2) {
                             HorizontalDivider(
                                 modifier = Modifier
                                     .fillMaxWidth()
