@@ -86,7 +86,8 @@ class ViewerViewportLayoutTest {
         compose.onNodeWithContentDescription("Tune").performClick()
         assertEquals(initialHeight, assertViewportBounds())
         compose.onNodeWithContentDescription("Tune").performClick()
-        for (tab in listOf("Rotate", "Animations", "ZoomPan", "Shake")) {
+        compose.onNodeWithContentDescription("ZoomPan").assertDoesNotExist()
+        for (tab in listOf("Rotate", "Animations", "Shake")) {
             compose.onNodeWithContentDescription(tab).performClick()
             assertEquals("Tab $tab must retain the same viewport height", initialHeight, assertViewportBounds())
         }

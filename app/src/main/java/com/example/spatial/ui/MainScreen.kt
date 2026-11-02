@@ -175,7 +175,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
     // Sub-panels in Viewer mode: 0 = none, 1 = Patterns/Speed, 2 = Fine-Tune
     var activeViewerPanel by remember { mutableIntStateOf(0) }
 
-    // Bottom 4 Tabs: 0: Rotate (Rotational Tilt), 1: Shake (Jelly Physics), 2: Animations, 3: ZoomPan
+    // Bottom 3 Tabs: 0: Rotate (Rotational Tilt), 1: Shake (Jelly Physics), 2: Animations
     var selectedBottomTab by remember { mutableIntStateOf(0) }
     var toolbarHeightPx by remember { mutableIntStateOf(0) }
     var bottomBarHeightPx by remember { mutableIntStateOf(0) }
@@ -977,49 +977,47 @@ fun ViewerScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Actions on the right (shown except in clean full-screen mode)
-                if (selectedBottomTab != 3) {
-                    // Wallpaper
-                    IconButton(onClick = onSetWallpaper) {
+                // Actions on the right
+                // Wallpaper
+                IconButton(onClick = onSetWallpaper) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_wallpaper_phone),
+                        contentDescription = "Set Wallpaper",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                // Download / Save (Shown ONLY in Tab 2 Animations)
+                if (selectedBottomTab == 2) {
+                    IconButton(onClick = onSave) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_wallpaper_phone),
-                            contentDescription = "Set Wallpaper",
+                            painter = painterResource(id = R.drawable.ic_save_real),
+                            contentDescription = "Save",
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)
                         )
                     }
 
-                    // Download / Save (Shown ONLY in Tab 2 Animations)
-                    if (selectedBottomTab == 2) {
-                        IconButton(onClick = onSave) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_save_real),
-                                contentDescription = "Save",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        // Share (Shown ONLY in Tab 2 Animations)
-                        IconButton(onClick = onShare) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_share_real),
-                                contentDescription = "Share",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-
-                    // Tune / Properties Sliders Toggle Icon
-                    IconButton(onClick = onToggleControls) {
+                    // Share (Shown ONLY in Tab 2 Animations)
+                    IconButton(onClick = onShare) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_properties),
-                            contentDescription = "Tune",
-                            tint = if (showControls) Color(0xFF00A0E9) else Color.White,
+                            painter = painterResource(id = R.drawable.ic_share_real),
+                            contentDescription = "Share",
+                            tint = Color.White,
                             modifier = Modifier.size(24.dp)
                         )
                     }
+                }
+
+                // Tune / Properties Sliders Toggle Icon
+                IconButton(onClick = onToggleControls) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_properties),
+                        contentDescription = "Tune",
+                        tint = if (showControls) Color(0xFF00A0E9) else Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
 
                 // Delete / Trash Icon
@@ -1035,7 +1033,7 @@ fun ViewerScreen(
 
             // TOP SLIDERS OVERLAY PANEL (view_image_controls clone)
             AnimatedVisibility(
-                visible = showControls && selectedBottomTab != 3,
+                visible = showControls,
                 enter = fadeIn() + slideInVertically { -it },
                 exit = fadeOut() + slideOutVertically { -it }
             ) {
@@ -1329,8 +1327,7 @@ fun ViewerScreen(
                     val tabs = listOf(
                         Pair(R.drawable.ic_rotate_tab, "Shake"),
                         Pair(R.drawable.ic_shake_tab, "Rotate"),
-                        Pair(R.drawable.ic_animations_tab, "Animations"),
-                        Pair(R.drawable.ic_zoom_pan_tab, "ZoomPan")
+                        Pair(R.drawable.ic_animations_tab, "Animations")
                     )
 
                     tabs.forEachIndexed { index, tab ->
@@ -1359,12 +1356,6 @@ fun ViewerScreen(
                                             if (config.patternId.isEmpty() || config.patternId.equals("none", ignoreCase = true)) {
                                                 onSelectPattern("horizontal")
                                             }
-                                        }
-                                        3 -> {
-                                            // Tab 3: Zoom / Pan mode (hides properties panel per rk0.s())
-                                            if (isSensorEnabled) onToggleSensor()
-                                            onSelectPattern("none")
-                                            if (showControls) onToggleControls()
                                         }
                                     }
                                 },

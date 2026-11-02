@@ -239,6 +239,21 @@
         "2026-11-02: Gỡ hàng nút Background (Dark/Black/White/Blue) khỏi bảng thông số trong MainScreen.kt và import TextButton không còn dùng. Giữ trường backgroundColor trong SpatialSceneConfig (đọc/lưu JSON, shader uBgColor) để tương thích scene cũ; test oldModesBecomeFitAndBackgroundColorSurvivesPersistence vẫn kiểm tra.",
         "2026-11-02: Verify pass 20261102T044027701Z-89d61602 (unit test, lintDebug, assembleDebug). Device pass 20261102T044109139Z-3652e8ab trên PGT-AN10 Android 9: 22/22. Chưa xem trực quan bảng thông số sau khi gỡ."
       ]
+    },
+    {
+      "id": "TABS-002",
+      "title": "Bỏ tab cuối (ZoomPan) khỏi thanh tab dưới",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Thanh tab dưới chỉ còn Shake/Rotate/Animations, không còn ZoomPan",
+        "Ba tab còn lại giữ nguyên hành vi, toolbar và bảng thông số",
+        "Chạy Verify và Device"
+      ],
+      "evidence": [
+        "2026-11-02: MainScreen.kt: bỏ ZoomPan khỏi danh sách tab và nhánh xử lý index 3; bỏ điều kiện selectedBottomTab != 3 ở toolbar và bảng thông số (giờ luôn đúng). Giữ code chế độ 3 trong SpatialGLRenderer/ViewerFraming (UI không còn vào được) và drawable ic_zoom_pan_tab. ViewerViewportLayoutTest: bỏ ZoomPan khỏi vòng tab, thêm assert ZoomPan không tồn tại.",
+        "2026-11-02: Verify pass 20261102T045038593Z-b2745729 (unit test, lintDebug, assembleDebug). Device pass 20261102T045101442Z-9f8453ab trên PGT-AN10 Android 9: 22/22. Chưa xem trực quan thanh tab."
+      ]
     }
   ]
 }
