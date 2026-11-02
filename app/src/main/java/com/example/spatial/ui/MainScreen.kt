@@ -1,6 +1,5 @@
 package com.example.spatial.ui
 
-import androidx.compose.material3.TextButton
 
 import android.content.Intent
 import android.net.Uri
@@ -1225,16 +1224,6 @@ fun ViewerScreen(
                                     valueRange = 0.0f..1.0f,
                                     modifier = Modifier.fillMaxWidth()
                                 )
-                            }
-                        }
-
-                        Text("Background", color = Color.White, fontSize = 12.sp)
-                        Row(Modifier.fillMaxWidth()) {
-                            listOf("Dark" to 0xFF0F0F17.toInt(), "Black" to 0xFF000000.toInt(),
-                                "White" to 0xFFFFFFFF.toInt(), "Blue" to 0xFF18334F.toInt()).forEach { (name, color) ->
-                                TextButton(onClick = { onUpdateConfig { it.copy(backgroundColor = color) } }, modifier = Modifier.weight(1f)) {
-                                    Text(name, fontSize = 10.sp, color = if (config.backgroundColor == color) Color(0xFF76CFFF) else Color.White)
-                                }
                             }
                         }
 

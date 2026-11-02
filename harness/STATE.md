@@ -1,7 +1,8 @@
 # Bàn giao hiện tại
 
 - Ngày: 2026-11-02 (Asia/Saigon).
-- Phạm vi: `INTENSITY-001` ("Sửa lỗi thay đổi cường độ nhưng không có tác dụng") `done`; `EDGES-002` `done`. Không còn mục `in_progress`.
+- Phạm vi: `BGUI-001` ("Bỏ phần chọn màu background trên giao diện") `done`, chưa commit. Trước đó `INTENSITY-001` và `EDGES-002` `done`, đã commit 7980a5c. Không còn mục `in_progress`.
+- BGUI-001: gỡ hàng nút Background (Dark/Black/White/Blue) trong `MainScreen.kt`. Giữ `SpatialSceneConfig.backgroundColor` để đọc scene cũ; scene đã lưu màu khác mặc định vẫn dùng màu đó nhưng không còn UI để đổi. Verify pass `.harness/runs/20261102T044027701Z-89d61602/result.json`; Device pass `.harness/runs/20261102T044109139Z-3652e8ab/result.json` (22/22). Chưa xem trực quan.
 - Nguyên nhân INTENSITY-001: `intensity` trong `_desc.dat` là tham số Photos 3D thang 0..1.25 (ảnh mẫu 0.42-0.98; native `depthScale = 0.30 + 0.70 * i^3`, xem `PROGRESS.md`). Code kẹp về `MotionLimits.MAX_INTENSITY = 0.15` và render tuyến tính `0.045 + 0.115 * i`, nên slider 0..1.25 gần như vô tác dụng và mọi ảnh mẫu luôn ở max.
 - Khắc phục:
   - `MotionLimits`: `MAX_INTENSITY = 1.25`, `DEFAULT_INTENSITY = 0.8`; slider `0..MAX_INTENSITY`; `SpatialViewModel.updateIntensity` sanitize; scene custom dùng `DEFAULT_INTENSITY`.

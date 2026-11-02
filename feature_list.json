@@ -224,6 +224,21 @@
         "2026-11-02: Test: wholeIntensityRangeChangesParallax và bundledSceneIntensitiesAreKeptAndRenderDifferently (giá trị astronaut/unicorn không bị kẹp, render khác nhau, dưới max). defaultIsLow viết lại theo parallax thực (depthHeight(default) <= 50% max) vì intensity 0.8 theo thang mới. Bỏ defaultKeepsPreviousParallaxSize của ánh xạ cũ. Lần Verify đầu fail 1 test do org.json là stub trên JVM; đổi test sang sanitized() (bước cuối của fromJson).",
         "2026-11-02: Verify pass 20261102T043112998Z-e89a9a41: 45/45 unit test, lintDebug, assembleDebug. Device pass 20261102T043152738Z-42b8f73e trên PGT-AN10 Android 9: 22/22. Chưa kiểm tra trực quan độ mạnh parallax của ảnh mẫu (sẽ yếu hơn trước: astronaut ~21%, unicorn ~57% max) và chưa so với app gốc."
       ]
+    },
+    {
+      "id": "BGUI-001",
+      "title": "Bỏ phần chọn màu background trên giao diện",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Bảng thông số không còn hàng nút Background (Dark/Black/White/Blue)",
+        "Scene cũ có backgroundColor vẫn đọc/lưu được",
+        "Chạy Verify và Device"
+      ],
+      "evidence": [
+        "2026-11-02: Gỡ hàng nút Background (Dark/Black/White/Blue) khỏi bảng thông số trong MainScreen.kt và import TextButton không còn dùng. Giữ trường backgroundColor trong SpatialSceneConfig (đọc/lưu JSON, shader uBgColor) để tương thích scene cũ; test oldModesBecomeFitAndBackgroundColorSurvivesPersistence vẫn kiểm tra.",
+        "2026-11-02: Verify pass 20261102T044027701Z-89d61602 (unit test, lintDebug, assembleDebug). Device pass 20261102T044109139Z-3652e8ab trên PGT-AN10 Android 9: 22/22. Chưa xem trực quan bảng thông số sau khi gỡ."
+      ]
     }
   ]
 }
