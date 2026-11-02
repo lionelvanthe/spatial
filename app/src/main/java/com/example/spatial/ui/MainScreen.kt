@@ -6,6 +6,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -359,11 +360,11 @@ fun MainScreen(viewModel: SpatialViewModel) {
                     screenMode = ScreenMode.VIEWER
                 },
                 onAddNewPhoto = {
-//                    imagePickerLauncher.launch(
-//                        ActivityResultContracts.PickVisualMediaRequest(
-//                            ActivityResultContracts.PickVisualMedia.ImageOnly
-//                        )
-//                    )
+                    imagePickerLauncher.launch(
+                        PickVisualMediaRequest(
+                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                        )
+                    )
                 }
             )
         }
