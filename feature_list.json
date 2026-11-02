@@ -270,6 +270,42 @@
         "2026-11-02: Test mới SceneLoadingTest.loadingCoversTheOldSceneUntilTheNewOneIsDrawn: mở Cliffside, chờ loader tắt và renderer vẽ đúng bitmap; tạm dừng GL view, chọn scene mới, loader phải hiện; resume, loader tắt và renderer dùng bitmap mới.",
         "2026-11-02: Verify pass 20261102T045454966Z-abb1f285 (unit test, lintDebug, assembleDebug). Device lượt 1 treo ở ZoomExportTest (encoder emulator, lỗi đã gặp trước), SceneLoadingTest đã pass trong lượt đó; dừng và chạy lại pass 20261102T050028349Z-136a8c72 trên PGT-AN10 Android 9: 23/23. Chưa xem trực quan."
       ]
+    },
+    {
+      "id": "MOTION-001",
+      "title": "Sửa lỗi mẫu chuyển động triangular_cw và square_cw không hoạt động",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Mẫu triangular_cw di chuyển camera theo quỹ đạo tam giác đều theo chiều kim đồng hồ",
+        "Mẫu square_cw di chuyển camera theo quỹ đạo hình vuông theo chiều kim đồng hồ",
+        "Cả live render (preview) và xuất video MP4 đều áp dụng đúng hai mẫu chuyển động này",
+        "Có unit test kiểm tra tính toán tọa độ và khép kín chu kỳ của triangular_cw và square_cw; chạy Verify và Device thành công"
+      ],
+      "evidence": [
+        "2026-11-02: Phân tích native libPhotos3DModelManager.so: PatternAnimations::animateSquareCW (0x16f35), animateSquareCCW (0x16fdb) và animateTriangularCW (0x16ded). Square đi theo 4 cạnh hình vuông quanh chu vi [-1, 1] x [-1, 1] theo chiều kim đồng hồ; Triangle đi theo 3 đỉnh tam giác đều (0, 1), (sqrt(3)/2, -0.5), (-sqrt(3)/2, -0.5) với nội suy cosine mềm.",
+        "2026-11-02: Đã thêm các nhánh square_cw, square, square_ccw, triangular_cw, triangle, triangular vào MotionPattern.sample(). Cả live viewer lẫn video exporter dùng chung MotionPattern.sample().",
+        "2026-11-02: Thêm unit test LoopPlanTest (squareCwFollowsClockwisePerimeter, triangularCwFollowsEquilateralTriangleVertices, squareCcwInvertsX, và đưa vào everyPatternReturnsToItsStartAfterOneLoop).",
+        "2026-11-02: Verify pass .harness/runs/20261102T062132330Z-1f763fb1/result.json (48/48 unit tests, lintDebug, assembleDebug). Device pass .harness/runs/20261102T063442870Z-8df440f2/result.json trên emulator-5554 Android 9 (23/23 tests pass, 0 failed, 0 skipped)."
+      ]
+    },
+    {
+      "id": "MOTION-002",
+      "title": "Bỏ mẫu chuyển động none khỏi danh sách lựa chọn Animations",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Danh sách ALL_MOTION_PATTERNS không còn chứa mục none (Sensor Only)",
+        "Giao diện tab Animations không còn hiển thị nút none trong thanh chọn mẫu",
+        "Chuyển sang tab Animations khi pattern là none tự động chọn pattern hợp lệ (horizontal)",
+        "Chạy Verify và Device pass"
+      ],
+      "evidence": [
+        "2026-11-02: Đã gỡ bỏ MotionPatternItem(\"none\", \"Sensor Only\", R.drawable.ic_speed) khỏi danh sách ALL_MOTION_PATTERNS trong MainScreen.kt.",
+        "2026-11-02: Giữ nguyên logic nội bộ onSelectPattern(\"none\") khi chọn Tab 0 (Rotate) và Tab 1 (Shake); khi chuyển sang Tab 2 (Animations) tự động fallback chọn pattern horizontal thay vì none.",
+        "2026-11-02: Thêm unit test allMotionPatternsExcludesNone trong LoopPlanTest khẳng định ALL_MOTION_PATTERNS không chứa id none.",
+        "2026-11-02: Verify pass .harness/runs/20261102T064124306Z-a89fd6f2/result.json (49 unit tests JVM, lintDebug, assembleDebug). Device pass .harness/runs/20261102T064238181Z-e2023c9d/result.json trên emulator-5554 Android 9 (23/23 tests pass, 0 failed, 0 skipped)."
+      ]
     }
   ]
 }

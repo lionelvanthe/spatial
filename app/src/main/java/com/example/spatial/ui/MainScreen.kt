@@ -136,7 +136,6 @@ val ALL_MOTION_PATTERNS = listOf(
     MotionPatternItem("square_cw", "Square CW", R.drawable.pattern_square_cw),
     MotionPatternItem("triangular_cw", "Triangle", R.drawable.pattern_triangular_cw),
     MotionPatternItem("zoom", "Zoom", R.drawable.ic_zoom_prop),
-    MotionPatternItem("none", "Sensor Only", R.drawable.ic_speed)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

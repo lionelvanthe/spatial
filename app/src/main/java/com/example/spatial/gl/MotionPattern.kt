@@ -4,6 +4,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /** Pre-programmed camera paths of the Animations tab, shared by live rendering and video export. */
 object MotionPattern {
@@ -59,6 +60,74 @@ object MotionPattern {
             }
             "horizontal_rapid" -> x = sin(cycle * 2.2f) * intensity
             "vertical_rapid" -> y = sin(cycle * 2.2f) * intensity
+            "square_cw", "square" -> {
+                val t = ((cycle / TWO_PI) % 1.0f + 1.0f) % 1.0f
+                when {
+                    t < 0.25f -> {
+                        x = -1.0f + 8.0f * t
+                        y = 1.0f
+                    }
+                    t < 0.50f -> {
+                        x = 1.0f
+                        y = 1.0f - 8.0f * (t - 0.25f)
+                    }
+                    t < 0.75f -> {
+                        x = 1.0f - 8.0f * (t - 0.50f)
+                        y = -1.0f
+                    }
+                    else -> {
+                        x = -1.0f
+                        y = -1.0f + 8.0f * (t - 0.75f)
+                    }
+                }
+                x *= intensity
+                y *= intensity
+            }
+            "square_ccw" -> {
+                val t = ((cycle / TWO_PI) % 1.0f + 1.0f) % 1.0f
+                when {
+                    t < 0.25f -> {
+                        x = -1.0f + 8.0f * t
+                        y = 1.0f
+                    }
+                    t < 0.50f -> {
+                        x = 1.0f
+                        y = 1.0f - 8.0f * (t - 0.25f)
+                    }
+                    t < 0.75f -> {
+                        x = 1.0f - 8.0f * (t - 0.50f)
+                        y = -1.0f
+                    }
+                    else -> {
+                        x = -1.0f
+                        y = -1.0f + 8.0f * (t - 0.75f)
+                    }
+                }
+                x = -x * intensity
+                y *= intensity
+            }
+            "triangular_cw", "triangle", "triangular" -> {
+                val t = ((cycle / TWO_PI) % 1.0f + 1.0f) % 1.0f
+                when {
+                    t < 1.0f / 3.0f -> {
+                        val u = (1.0f - cos(t * 3.0f * PI_F)) * 0.5f
+                        x = u * SQRT3_OVER_2
+                        y = 1.0f - 1.5f * u
+                    }
+                    t < 2.0f / 3.0f -> {
+                        val u = (1.0f - cos((t - 1.0f / 3.0f) * 3.0f * PI_F)) * 0.5f
+                        x = SQRT3_OVER_2 - u * SQRT3
+                        y = -0.5f
+                    }
+                    else -> {
+                        val u = (1.0f - cos((t - 2.0f / 3.0f) * 3.0f * PI_F)) * 0.5f
+                        x = -SQRT3_OVER_2 + u * SQRT3_OVER_2
+                        y = -0.5f + 1.5f * u
+                    }
+                }
+                x *= intensity
+                y *= intensity
+            }
             "zoom" -> z = sin(cycle) * 0.25f * intensity
         }
         out[0] = x
@@ -71,4 +140,8 @@ object MotionPattern {
         if (patternId.equals("spiral_cw", ignoreCase = true)) 2 else 1
 
     private const val SPIRAL_PERIOD = (4.0 * PI).toFloat()
+    private const val TWO_PI = (2.0 * PI).toFloat()
+    private const val PI_F = PI.toFloat()
+    private val SQRT3 = sqrt(3.0f)
+    private val SQRT3_OVER_2 = SQRT3 / 2.0f
 }
