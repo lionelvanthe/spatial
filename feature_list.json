@@ -187,7 +187,7 @@
     {
       "id": "EDGES-002",
       "title": "Sửa lỗi hai bên bị viền đen khi parallax",
-      "status": "in_progress",
+      "status": "done",
       "depends_on": [
         "EDGES-001"
       ],
@@ -196,7 +196,34 @@
         "Chuyển động parallax đồng nhất theo depth tới sát mép ảnh, không kéo giãn biến dạng mép",
         "Chạy Verify và Device thành công; kiểm tra trực quan trên ảnh render Cliffside Village"
       ],
-      "evidence": []
+      "evidence": [
+        "2026-11-02: Người dùng xác nhận đóng. Bàn giao 2026-11-01 (commit 36f0f51) ghi Verify 43/43 và Device 22/22 pass trên Pixel_9_Pro AVD, nhưng các run report dẫn chứng không còn trong .harness/runs/; Device chạy lại trong INTENSITY-001 bao gồm ParallaxBorderTest.",
+        "2026-11-02: Mở lại. Device 20261102T035913511Z-00f9e7e7 trên PGT-AN10 (Android 9, Adreno 750): flatSurfaceMovesRigidlyThroughBothImageEdges fail 'Left border must not expose background'. Chạy riêng ParallaxBorderTest trên code HEAD 36f0f51 (stash thay đổi INTENSITY-001) cũng fail giống hệt. Test đã commit không đặt uScaleType = 0f như bàn giao mô tả; ParallaxGpuFixture mặc định uScaleType = 1 (Fill) nên shader trả uBgColor ở mép. Chưa sửa.",
+        "2026-11-02: Sửa ParallaxBorderTest.flatSurfaceMovesRigidlyThroughBothImageEdges đặt uScaleType = 0f (Fit, đúng chế độ app dùng) như bàn giao 2026-11-01 đã mô tả; không đổi assertion. Device lần 1 (20261102T040207048Z-3ba31590) test này pass nhưng run bị treo ở ZoomExportTest (encoder H.264 phần mềm của emulator), đã dừng. Device chạy lại pass 20261102T041237424Z-d0fabef0 trên PGT-AN10 Android 9: 22/22, 0 failed/skipped. Chưa kiểm tra trực quan Cliffside và cảm biến máy thật trong phiên này."
+      ]
+    },
+    {
+      "id": "INTENSITY-001",
+      "title": "Sửa lỗi thay đổi cường độ nhưng không có tác dụng",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Toàn bộ hành trình slider Cường độ làm thay đổi parallax, không có vùng chết",
+        "intensity giữ nghĩa của Photos 3D như trong _desc.dat (thang 0..1.25); mở ảnh mẫu không bị kẹp về max",
+        "Không vượt kích thước parallax tối đa đã kiểm chứng (uDepthHeight 0.06225); config vượt giới hạn vẫn đọc được và bị kẹp",
+        "Preview, wallpaper và export dùng chung một ánh xạ; chạy Verify và Device"
+      ],
+      "evidence": [
+        "2026-11-02: Nguyên nhân: slider Cường độ có range 0..1.25 nhưng sanitized() kẹp intensity về MAX_INTENSITY 0.15, nên ~88% hành trình slider không đổi gì; đoạn 0..0.15 chỉ đổi uDepthHeight 0.045 -> 0.062 (công thức 0.045 + 0.115 * intensity) nên gần như không thấy.",
+        "2026-11-02: Sửa: slider dùng range 0..MotionLimits.MAX_INTENSITY, updateIntensity gọi sanitized(); thêm MotionLimits.depthHeight() ánh xạ tuyến tính 0..MAX_INTENSITY -> 0..0.06225 (bằng mức tối đa cũ, không tăng giới hạn), dùng chung cho SpatialGLRenderer (preview + wallpaper) và VideoExporter. DEFAULT_INTENSITY 0.08 -> 0.13 để mặc định giữ kích thước parallax cũ (~0.054). Config cũ có intensity > 0.15 vẫn bị kẹp về max.",
+        "2026-11-02: Init pass 20261102T035442858Z-a79477b0. Verify pass 20261102T035547954Z-b9505f01: testDebugUnitTest 45/45 (thêm wholeIntensityRangeChangesParallax, defaultKeepsPreviousParallaxSize), lintDebug, assembleDebug. git diff --check pass. Chưa chạy Device và chưa kiểm tra trực quan/máy thật.",
+        "2026-11-02: Device 20261102T035913511Z-00f9e7e7 trên PGT-AN10 (Android 9): 21/22 pass; lỗi duy nhất là ParallaxBorderTest.flatSurfaceMovesRigidlyThroughBothImageEdges, đã chứng minh có sẵn trên HEAD không kèm thay đổi này (test chỉ đặt uniform shader trực tiếp, không đi qua MotionLimits/renderer). Chưa quan sát trực quan khi kéo slider trên thiết bị.",
+        "2026-11-02: Device chạy lại pass 20261102T041237424Z-d0fabef0: 22/22 trên PGT-AN10 Android 9.",
+        "2026-11-02: Mở lại. Người dùng báo mở ảnh mẫu thì slider luôn max: 16 file _desc.dat lưu intensity 0.42-0.98 theo thang Photos 3D 0..1.25 (depthScale native 0.30 + 0.70*i^3, PROGRESS.md), bị kẹp về MAX_INTENSITY 0.15. Bản ánh xạ tuyến tính 0..0.15 trước đó hiểu sai ý nghĩa giá trị.",
+        "2026-11-02: Sửa: MotionLimits.MAX_INTENSITY 0.15 -> 1.25, DEFAULT_INTENSITY -> 0.8 (thang/mặc định Photos 3D). Bỏ MotionLimits.depthHeight tuyến tính; thêm DepthProjection.depthHeight = 0.06225 * depthScale(i) / depthScale(1.25), dùng depthScale native có sẵn, cho SpatialGLRenderer và VideoExporter. Max parallax giữ 0.06225; i = 0 còn 18% (0.30/1.667) như native. Slider dùng MotionLimits.MAX_INTENSITY nên tự thành 0..1.25.",
+        "2026-11-02: Test: wholeIntensityRangeChangesParallax và bundledSceneIntensitiesAreKeptAndRenderDifferently (giá trị astronaut/unicorn không bị kẹp, render khác nhau, dưới max). defaultIsLow viết lại theo parallax thực (depthHeight(default) <= 50% max) vì intensity 0.8 theo thang mới. Bỏ defaultKeepsPreviousParallaxSize của ánh xạ cũ. Lần Verify đầu fail 1 test do org.json là stub trên JVM; đổi test sang sanitized() (bước cuối của fromJson).",
+        "2026-11-02: Verify pass 20261102T043112998Z-e89a9a41: 45/45 unit test, lintDebug, assembleDebug. Device pass 20261102T043152738Z-42b8f73e trên PGT-AN10 Android 9: 22/22. Chưa kiểm tra trực quan độ mạnh parallax của ảnh mẫu (sẽ yếu hơn trước: astronaut ~21%, unicorn ~57% max) và chưa so với app gốc."
+      ]
     }
   ]
 }

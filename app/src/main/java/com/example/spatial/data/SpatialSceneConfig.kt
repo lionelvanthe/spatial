@@ -15,8 +15,9 @@ enum class ImageFitMode(val shaderValue: Float, val label: String) {
  * Data model for 3D spatial scene parameters matching _desc.dat
  */
 object MotionLimits {
-    const val DEFAULT_INTENSITY = 0.08f
-    const val MAX_INTENSITY = 0.15f
+    // Photos 3D scale, as stored in the bundled _desc.dat files (slider 0..1.25, default 0.8).
+    const val DEFAULT_INTENSITY = 0.8f
+    const val MAX_INTENSITY = 1.25f
     const val MIN_ZOOM = -0.35f
     const val MAX_ZOOM = 0.35f
     const val MAX_ZOOM_3D = 0.35f

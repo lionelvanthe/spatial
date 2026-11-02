@@ -403,7 +403,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[3])
         GLES20.glUniform1i(uForegroundMaskHandle, 3)
         GLES20.glUniform2f(uOffsetHandle, smoothTiltX.coerceIn(-1f, 1f), smoothTiltY.coerceIn(-1f, 1f))
-        GLES20.glUniform1f(uDepthHeightHandle, (0.045f + 0.115f * sceneConfig.intensity).coerceIn(0.0f, 0.19f))
+        GLES20.glUniform1f(uDepthHeightHandle, DepthProjection.depthHeight(sceneConfig.intensity))
         GLES20.glUniform1f(uNeutralHandle, effectiveDepthCenter)
         GLES20.glUniform1f(uAspectRatioHandle, screenAspect)
         GLES20.glUniform1f(uImageAspectHandle, imageAspect)

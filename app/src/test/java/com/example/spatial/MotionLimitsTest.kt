@@ -2,6 +2,7 @@ package com.example.spatial
 
 import com.example.spatial.data.MotionLimits
 import com.example.spatial.data.SpatialSceneConfig
+import com.example.spatial.gl.DepthProjection
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -35,9 +36,34 @@ class MotionLimitsTest {
         assertEquals(c, c.sanitized())
     }
 
+    @Test fun wholeIntensityRangeChangesParallax() {
+        // Native depthScale keeps 30% of the motion at zero and peaks at the validated maximum.
+        assertEquals(DepthProjection.MAX_DEPTH_HEIGHT * .3f / DepthProjection.depthScale(1.25f),
+            DepthProjection.depthHeight(0f), 1e-6f)
+        assertEquals(DepthProjection.MAX_DEPTH_HEIGHT, DepthProjection.depthHeight(MotionLimits.MAX_INTENSITY), 1e-6f)
+        var previous = -1f
+        for (step in 0..10) {
+            val h = DepthProjection.depthHeight(MotionLimits.MAX_INTENSITY * step / 10f)
+            assertTrue("step $step", h > previous)
+            previous = h
+        }
+        assertEquals(DepthProjection.MAX_DEPTH_HEIGHT, DepthProjection.depthHeight(9f), 1e-6f)
+    }
+
+    @Test fun bundledSceneIntensitiesAreKeptAndRenderDifferently() {
+        // Values from astronaut_desc.dat and unicorn_desc.dat; fromJson ends with sanitized().
+        val low = SpatialSceneConfig(intensity = 0.4167618155479431f).sanitized()
+        val high = SpatialSceneConfig(intensity = 0.9775443077087402f).sanitized()
+        assertEquals(0.41676f, low.intensity, 1e-5f)
+        assertEquals(0.97754f, high.intensity, 1e-5f)
+        assertTrue(DepthProjection.depthHeight(low.intensity) < DepthProjection.depthHeight(high.intensity))
+        assertTrue(DepthProjection.depthHeight(high.intensity) < DepthProjection.MAX_DEPTH_HEIGHT)
+    }
+
     @Test fun defaultIsLow() {
         val d = SpatialSceneConfig()
-        assertTrue(d.intensity <= 0.5f)
+        // The default sits below half of the maximum parallax.
+        assertTrue(DepthProjection.depthHeight(d.intensity) <= .5f * DepthProjection.MAX_DEPTH_HEIGHT)
         assertEquals(d, d.sanitized())
     }
 }

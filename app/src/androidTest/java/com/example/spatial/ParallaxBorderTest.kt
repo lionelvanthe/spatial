@@ -39,6 +39,8 @@ class ParallaxBorderTest {
             gpu.upload(0, gpu.bitmap { x, _ -> Color.rgb(x, 80, 120) })
             gpu.upload(2, gpu.bitmap { x, _ -> Color.rgb(x, 80, 120) })
             gpu.upload(3, gpu.bitmap { _, _ -> Color.WHITE })
+            // The app always renders in Fit mode; the fixture defaults to Fill.
+            gpu.uniform("uScaleType", 0f)
             gpu.uniform("uFill", 1f)
             gpu.uniform("uDepthHeight", .12f)
             gpu.uniform("uNeutral", .5f)

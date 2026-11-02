@@ -17,6 +17,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.spatial.ai.DepthEstimationManager
 import com.example.spatial.data.AssetDataLoader
+import com.example.spatial.data.MotionLimits
 import com.example.spatial.data.SpatialSceneConfig
 import com.example.spatial.data.SpatialSceneItem
 import com.example.spatial.gl.VideoExporter
@@ -152,7 +153,7 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateIntensity(intensity: Float) {
-        val newCfg = _currentConfig.value.copy(intensity = intensity)
+        val newCfg = _currentConfig.value.copy(intensity = intensity).sanitized()
         _currentConfig.value = newCfg
         persistConfigForWallpaper(newCfg)
     }
@@ -245,7 +246,7 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                     isCustom = true,
                     customImageUri = uri.toString(),
                     config = SpatialSceneConfig(
-                        intensity = 0.08f,
+                        intensity = MotionLimits.DEFAULT_INTENSITY,
                         depthCenter = 0.5f,
                         speed = 0.35f,
                         zoom = 0.0f,

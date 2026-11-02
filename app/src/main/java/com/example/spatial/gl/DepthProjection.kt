@@ -1,5 +1,6 @@
 package com.example.spatial.gl
 
+import com.example.spatial.data.MotionLimits
 import kotlin.math.pow
 
 /** Geometry reconstructed from a fixed source camera, independent of live zoom. */
@@ -16,6 +17,13 @@ internal object DepthProjection {
         val i = intensity.coerceIn(0f, 1.25f)
         return 0.30f + 0.70f * i * i * i
     }
+
+    // Shader parallax size at MAX_INTENSITY: the largest value validated on device.
+    const val MAX_DEPTH_HEIGHT = 0.06225f
+
+    /** Shader parallax size, following the native depthScale curve up to MAX_DEPTH_HEIGHT. */
+    fun depthHeight(intensity: Float): Float =
+        MAX_DEPTH_HEIGHT * depthScale(intensity) / depthScale(MotionLimits.MAX_INTENSITY)
 
     /** Physical height of the mesh above the photo plane; the camera shift turns it into parallax. */
     fun relief(depth: Float, intensity: Float, center: Float): Float =

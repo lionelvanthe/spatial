@@ -1054,7 +1054,7 @@ fun ViewerScreen(
                             .fillMaxWidth()
                             .padding(horizontal = 14.dp, vertical = 6.dp)
                     ) {
-                        // ROW 1: CƯỜNG ĐỘ (Intensity: 0.0 .. 1.25) + [CHECKBOX ĐẢO (Invert) in Tab 0]
+                        // ROW 1: CƯỜNG ĐỘ (Intensity: 0.0 .. MotionLimits.MAX_INTENSITY) + [CHECKBOX ĐẢO (Invert) in Tab 0]
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
@@ -1076,7 +1076,7 @@ fun ViewerScreen(
                             CustomSpatialSlider(
                                 value = config.intensity,
                                 onValueChange = onUpdateIntensity,
-                                valueRange = 0.0f..1.25f,
+                                valueRange = 0.0f..MotionLimits.MAX_INTENSITY,
                                 modifier = Modifier.weight(5f)
                             )
 

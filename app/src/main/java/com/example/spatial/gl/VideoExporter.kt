@@ -260,7 +260,7 @@ class VideoExporter {
             uniform1i("uInpaint", 2)
             uniform1i("uForegroundMask", 3)
             GLES20.glUniform2f(loc("uOffset"), sample[0].coerceIn(-1f, 1f), sample[1].coerceIn(-1f, 1f))
-            GLES20.glUniform1f(loc("uDepthHeight"), (0.045f + 0.115f * config.intensity).coerceIn(0.0f, 0.19f))
+            GLES20.glUniform1f(loc("uDepthHeight"), DepthProjection.depthHeight(config.intensity))
             GLES20.glUniform1f(loc("uNeutral"), ViewerFraming.depthCenter(config.depthCenter))
             GLES20.glUniform1f(loc("uAspectRatio"), width.toFloat() / height)
             GLES20.glUniform1f(loc("uImageAspect"), imageAspect)
