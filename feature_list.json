@@ -325,6 +325,99 @@
         "2026-11-02: Thêm unit test elasticityValuesAreClamped và elasticityControlsSpringKAndDampC trong MotionLimitsTest; thêm instrumented test tab2HasElasticityZoomAndLookControls trong ZoomControlsTest kiểm tra sự tồn tại và thao tác thanh trượt trên cả 3 tab.",
         "2026-11-02: Verify pass .harness/runs/20261102T070216287Z-9a00ef46/result.json (51 unit tests JVM, lintDebug, assembleDebug). Device pass .harness/runs/20261102T070420154Z-e263825c/result.json trên emulator-5554 Android 9 (24/24 connected instrumentation tests passed, 0 failed, 0 skipped)."
       ]
+    },
+    {
+      "id": "SENSOR-001",
+      "title": "Cải tiến hiệu ứng parallax khi nghiêng và lắc điện thoại",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "RelativeTilt phản hồi chính xác cả thao tác nghiêng cổ tay Roll (trái/phải) và gập Pitch (lên/xuống) khi cầm máy ở các góc thông thường",
+        "Có cơ chế tự hồi tâm (auto-centering) mượt mà giúp cân bằng ảnh ở giữa, tránh kẹt kịch trần khi đổi tư thế cầm",
+        "Dải phản hồi và độ nhạy cân đối, mượt mà giữa trục X và Y",
+        "Lắc máy ở Tab 1 (Shake) truyền xung lực vào mô phỏng thạch đàn hồi Jelly",
+        "Có unit test xác minh và chạy Verify pass"
+      ],
+      "evidence": [
+        "2026-11-02: Nâng cấp thuật toán RelativeTilt.kt: tính toán kết hợp cả góc xoay Yaw hYaw (initial[0]*matrix[2] + ...) và góc nghiêng cổ tay Roll hRoll (-(initial[1]*matrix[0] + ...)). Khắc phục triệt để hiện tượng triệt tiêu phản hồi trục ngang khi lắc/nghiêng cổ tay ở góc cầm máy tự nhiên.",
+        "2026-11-02: Tích hợp hàm nén mượt softCompress(value) và điều chỉnh hệ số nhạy gyroGain = 1.35f trong SpatialGLRenderer.kt, cho dải nghiêng đạt góc tự nhiên 25-30 độ mà không bị kịch trần (hard clamping) đột ngột.",
+        "2026-11-02: Bổ sung cơ chế tự hồi tâm (auto-centering) mượt mà với gyroNeutralX/Y trôi chậm về tư thế nghỉ (drift rate 0.22*dt), tự động cân bằng ảnh ở giữa và hỗ trợ nhấp đúp (resetTouchState) để reset tâm tức thì.",
+        "2026-11-02: Tab 1 (Shake / Jelly): trích xuất vận tốc cảm biến (gyroVx/Vy) khi lắc máy để truyền xung lực vào mô phỏng thạch đàn hồi Jelly, kích hoạt hiệu ứng nảy thạch sinh động khi lắc máy giống như khi vuốt thả tay; đồng thời bổ sung LERP smoothing loại bỏ rung giật cảm biến.",
+        "2026-11-02: Bổ sung unit test relativeTiltWorksWhenPhoneIsRolled và relativeTiltWorksWhenPhoneIsPitched trong SpatialProjectionTest.kt (53/53 tests JVM pass toàn bộ).",
+        "2026-11-02: Verify pass .harness/runs/20261102T072825829Z-c169497b/result.json (53 unit tests, lintDebug, assembleDebug). Device pass .harness/runs/20261102T072921887Z-0e0b32eb/result.json trên emulator-5554 Android 9 (24/24 connected instrumentation tests passed, 0 failed, 0 skipped)."
+      ]
+    },
+    {
+      "id": "SENSOR-002",
+      "title": "Tăng tốc độ tự hồi tâm của parallax cảm biến",
+      "status": "done",
+      "depends_on": [
+        "SENSOR-001"
+      ],
+      "acceptance": [
+        "Tăng tốc độ tự hồi tâm (auto-centering rate) trong SpatialGLRenderer lên mức đáp ứng nhanh và dứt khoát hơn (thay vì 0.22f * dt)",
+        "Áp dụng tốc độ hồi tâm thích ứng: hồi tâm nhanh hơn khi giữ máy ổn định hoặc khi ảnh lệch nhiều, không cản trở chuyển động nghiêng tức thời",
+        "Verify và Device pass"
+      ],
+      "evidence": [
+        "2026-11-02: Nâng cấp thuật toán auto-centering trong SpatialGLRenderer.kt: tăng tốc độ cơ sở từ 0.22f lên 0.95f, kết hợp hệ số thích ứng theo vận tốc chuyển động (restingBoost = 1.5f khi giữ máy ổn định) và độ lệch khỏi tâm (edgeBoost = 1.0f + offsetDistance * 1.2f).",
+        "2026-11-02: Nâng trần recenterAlpha lên 0.12f, giúp thời gian tự hồi tâm về vị trí cân bằng giảm xuống chỉ còn khoảng ~1.0 giây khi giữ yên máy mà không gây giật khung hình.",
+        "2026-11-02: Verify pass .harness/runs/20261102T073826282Z-18f25f4a/result.json (53 unit tests, lintDebug, assembleDebug). Device pass .harness/runs/20261102T073856856Z-dbdcee18/result.json trên emulator-5554 Android 9 (24/24 connected tests passed, 0 failed, 0 skipped)."
+      ]
+    },
+    {
+      "id": "SENSOR-003",
+      "title": "Tiếp tục tăng tốc độ tự hồi tâm cho parallax cảm biến",
+      "status": "done",
+      "depends_on": [
+        "SENSOR-002"
+      ],
+      "acceptance": [
+        "Tăng tốc độ tự hồi tâm recenterRate lên khoảng 2.2f - 2.5f (thời gian hồi tâm về giữa đạt khoảng 0.4s - 0.6s khi giữ yên máy)",
+        "Mở rộng trần recenterAlpha lên 0.25f để hồi tâm dứt khoát và tức thì hơn",
+        "Verify và Device pass"
+      ],
+      "evidence": [
+        "2026-11-02: Nâng tốc độ hồi tâm cơ sở recenterRate lên 2.4f (kết hợp restingBoost 1.8f khi giữ máy ổn định đạt 4.32f/s và lên tới 7-8f/s khi ở biên).",
+        "2026-11-02: Mở rộng ngưỡng trần recenterAlpha lên 0.25f, giảm thời gian hồi tâm tự động về trung tâm xuống khoảng ~0.4s - 0.5s cực kỳ nhanh và dứt khoát khi giữ máy ổn định.",
+        "2026-11-02: Verify pass .harness/runs/20261102T074241066Z-a78f16cc/result.json (53 unit tests, lintDebug, assembleDebug). Device pass .harness/runs/20261102T074311502Z-b47da5ed/result.json trên emulator-5554 Android 9 (24/24 connected tests passed, 0 failed, 0 skipped)."
+      ]
+    },
+    {
+      "id": "SENSOR-004",
+      "title": "Tinh chỉnh giảm nhẹ tốc độ tự hồi tâm của parallax cảm biến",
+      "status": "done",
+      "depends_on": [
+        "SENSOR-003"
+      ],
+      "acceptance": [
+        "Tinh chỉnh giảm nhẹ recenterRate về khoảng 1.55f (thời gian tự hồi tâm về giữa đạt điểm ngọt ~0.7s - 0.8s)",
+        "Điều chỉnh restingBoost và recenterAlpha (0.18f) hài hòa, mượt mà",
+        "Verify và Device pass"
+      ],
+      "evidence": [
+        "2026-11-02: Tinh chỉnh giảm nhẹ tốc độ hồi tâm cơ sở recenterRate từ 2.4f về 1.55f (với restingBoost 1.5f khi giữ máy ổn định đạt tốc độ hiệu dụng ~2.3f/s), đưa thời gian hồi tâm tự động về tâm vào điểm ngọt hài hòa ~0.7s - 0.8s.",
+        "2026-11-02: Điều chỉnh trần recenterAlpha về 0.18f giúp chuyển động êm dịu, tự nhiên mà không có cảm giác bị giật hay hồi tâm quá gấp gáp.",
+        "2026-11-02: Verify pass .harness/runs/20261102T074749468Z-a91381b1/result.json (53 unit tests, lintDebug, assembleDebug). Device pass .harness/runs/20261102T074842762Z-6159ed1f/result.json trên emulator-5554 Android 9 (24/24 connected tests passed, 0 failed, 0 skipped)."
+      ]
+    },
+    {
+      "id": "SENSOR-005",
+      "title": "Tinh chỉnh tăng nhẹ tốc độ tự hồi tâm của parallax cảm biến",
+      "status": "done",
+      "depends_on": [
+        "SENSOR-004"
+      ],
+      "acceptance": [
+        "Tinh chỉnh tăng nhẹ recenterRate lên 1.95f (với restingBoost 1.65f cho tốc độ hồi tâm hiệu dụng ~3.2f/s, thời gian hồi tâm đạt ~0.55s - 0.6s)",
+        "Điều chỉnh recenterAlpha lên 0.22f phản hồi nhanh nhạy và mượt mà",
+        "Verify và Device pass"
+      ],
+      "evidence": [
+        "2026-11-02: Tinh chỉnh tăng nhẹ recenterRate lên 1.95f (kết hợp restingBoost 1.65f cho tốc độ hồi tâm hiệu dụng ~3.22f/s, thời gian tự hồi tâm về giữa đạt khoảng ~0.55s - 0.60s khi giữ máy ổn định).",
+        "2026-11-02: Nâng nhẹ trần bù trừ mỗi frame recenterAlpha lên 0.22f, giúp chuyển động hồi tâm dứt khoát, mượt mà và tự nhiên đúng điểm cân bằng.",
+        "2026-11-02: Verify pass .harness/runs/20261102T075104610Z-4c2c6e8c/result.json (53 unit tests, lintDebug, assembleDebug). Device pass .harness/runs/20261102T075446513Z-c1db39a2/result.json trên emulator-5554 Android 9 (24/24 connected tests passed, 0 failed, 0 skipped)."
+      ]
     }
   ]
 }

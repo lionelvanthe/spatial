@@ -103,9 +103,22 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     var jellyVelocityY = 0.0f
     @Volatile
     var jellyWavePhase = 0.0f
+    // Auto-centering neutral tracking for sensor orientation
+    private var gyroNeutralX = 0.0f
+    private var gyroNeutralY = 0.0f
+    private var prevRawGyroX = 0.0f
+    private var prevRawGyroY = 0.0f
     // Smooth movement state (Direct exponential LERP smoothing without spring bounce)
     private var smoothTiltX = 0.0f
     private var smoothTiltY = 0.0f
+
+    /**
+     * Soft saturation curve: linear near center, smoothly compresses near +/-1.0 without hard clipping.
+     */
+    private fun softCompress(value: Float): Float {
+        val clamped = value.coerceIn(-3.0f, 3.0f)
+        return (clamped / kotlin.math.sqrt(1.0f + 0.35f * clamped * clamped)).coerceIn(-1.0f, 1.0f)
+    }
     private var velocityX = 0.0f
     private var velocityY = 0.0f
     private var viewWidth = 1
@@ -150,6 +163,8 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         jellyDisplacementY = 0.0f
         jellyVelocityX = 0.0f
         jellyVelocityY = 0.0f
+        gyroNeutralX = gyroX
+        gyroNeutralY = gyroY
     }
     fun setSceneData(bitmap: Bitmap?, depthData: ByteArray?, config: SpatialSceneConfig, depthWidth: Int = 504, depthHeight: Int = 504) {
         sceneConfig = config.sanitized()
@@ -284,12 +299,43 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val animationZoom = if (activeTabMode == 2 && !patternSample[2].isNaN()) patternSample[2] else 0f
         // Invert factor
         val invertMult = if (sceneConfig.rInverted) -1.0f else 1.0f
+        val rawGx = gyroX
+        val rawGy = gyroY
+        val gyroVx = if (dt > 0.0001f) (rawGx - prevRawGyroX) / dt else 0.0f
+        val gyroVy = if (dt > 0.0001f) (rawGy - prevRawGyroY) / dt else 0.0f
+        prevRawGyroX = rawGx
+        prevRawGyroY = rawGy
+
+        // Responsive auto-centering: smoothly drifts the neutral point toward resting posture.
+        // Fine-tuned recovery: swiftly and smoothly returns to neutral within ~0.55s - 0.60s when device is resting.
+        val motionSpeed = kotlin.math.hypot(gyroVx, gyroVy)
+        val offsetDistance = kotlin.math.hypot(rawGx - gyroNeutralX, rawGy - gyroNeutralY)
+        val restingBoost = if (motionSpeed < 0.32f) 1.65f else (1.0f / (1.0f + motionSpeed * 1.5f)).coerceIn(0.4f, 1.0f)
+        val edgeBoost = 1.0f + offsetDistance * 1.4f
+        val recenterRate = 1.95f * restingBoost * edgeBoost
+        val recenterAlpha = (recenterRate * dt).coerceIn(0.0f, 0.22f)
+        gyroNeutralX += (rawGx - gyroNeutralX) * recenterAlpha
+        gyroNeutralY += (rawGy - gyroNeutralY) * recenterAlpha
+
+        val centeredGx = rawGx - gyroNeutralX
+        val centeredGy = rawGy - gyroNeutralY
+
         var targetTiltX: Float
         var targetTiltY: Float
         val isJelly = (activeTabMode == 1)
         if (isJelly) {
             // Tab 1: Authentic Jelly / Jello Physics Simulation
             if (!isTouching) {
+                // Feed shake motion (sudden device movement) into jelly mass-spring oscillator
+                val shakeMagnitude = kotlin.math.hypot(gyroVx, gyroVy)
+                if (shakeMagnitude > 0.8f) {
+                    val shakeMultiplier = (0.7f + 0.8f * sceneConfig.elasticity).coerceIn(0.5f, 2.0f)
+                    val impulseX = (gyroVx * shakeMultiplier * 0.9f * invertMult).coerceIn(-15.0f, 15.0f)
+                    val impulseY = (gyroVy * shakeMultiplier * 0.9f * invertMult).coerceIn(-15.0f, 15.0f)
+                    jellyVelocityX = (jellyVelocityX - impulseX).coerceIn(-18.0f, 18.0f)
+                    jellyVelocityY = (jellyVelocityY - impulseY).coerceIn(-18.0f, 18.0f)
+                }
+
                 // Mass-spring-damper harmonic ODE: F = -k * pos - c * vel
                 val springK = MotionLimits.springK(sceneConfig.elasticity)
                 val dampC = MotionLimits.dampC(sceneConfig.elasticity)
@@ -310,10 +356,14 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             }
             val speedMag = kotlin.math.hypot(jellyVelocityX, jellyVelocityY)
             jellyWavePhase += speedMag * dt * 12.0f
-            targetTiltX = (jellyDisplacementX + gyroX * 1.0f * invertMult).coerceIn(-1.0f, 1.0f)
-            targetTiltY = (jellyDisplacementY + gyroY * 1.0f * invertMult).coerceIn(-1.0f, 1.0f)
-            smoothTiltX = targetTiltX
-            smoothTiltY = targetTiltY
+            val baseTiltX = softCompress(centeredGx * 1.35f * invertMult)
+            val baseTiltY = softCompress(centeredGy * 1.35f * invertMult)
+            targetTiltX = (jellyDisplacementX + baseTiltX).coerceIn(-1.0f, 1.0f)
+            targetTiltY = (jellyDisplacementY + baseTiltY).coerceIn(-1.0f, 1.0f)
+            // LERP smoothing to filter out sensor jitter
+            val jellyLerp = (1.0f - kotlin.math.exp(-22.0f * dt)).coerceIn(0.08f, 1.0f)
+            smoothTiltX += (targetTiltX - smoothTiltX) * jellyLerp
+            smoothTiltY += (targetTiltY - smoothTiltY) * jellyLerp
         } else {
             // Strictly reset any leftover jelly physics state so Jelly never leaks into other tabs
             jellyDisplacementX = 0.0f
@@ -327,13 +377,17 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 if (kotlin.math.abs(touchDragY) < 0.0005f) touchDragY = 0.0f
             }
             if (activeTabMode == 0) {
-                // Tab 0: Rotational Arc (Shake) - Gyro + smooth touch drag
-                targetTiltX = (gyroX * 2.2f * invertMult) + touchDragX
-                targetTiltY = (gyroY * 2.2f * invertMult) + touchDragY
+                // Tab 0: Rotational Arc (Rotate) - Gyro + smooth touch drag
+                val sensorTiltX = softCompress(centeredGx * 1.35f * invertMult)
+                val sensorTiltY = softCompress(centeredGy * 1.35f * invertMult)
+                targetTiltX = (sensorTiltX + touchDragX).coerceIn(-1.0f, 1.0f)
+                targetTiltY = (sensorTiltY + touchDragY).coerceIn(-1.0f, 1.0f)
             } else if (activeTabMode == 2) {
                 // Tab 2: Animations mode
-                targetTiltX = (gyroX * 2.2f * invertMult) + touchDragX + animX
-                targetTiltY = (gyroY * 2.2f * invertMult) + touchDragY + animY
+                val sensorTiltX = softCompress(centeredGx * 1.35f * invertMult)
+                val sensorTiltY = softCompress(centeredGy * 1.35f * invertMult)
+                targetTiltX = (sensorTiltX + touchDragX + animX).coerceIn(-1.0f, 1.0f)
+                targetTiltY = (sensorTiltY + touchDragY + animY).coerceIn(-1.0f, 1.0f)
             } else {
                 // Tab 3: ZoomPan mode
                 targetTiltX = touchDragX

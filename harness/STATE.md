@@ -1,22 +1,17 @@
 # Bàn giao hiện tại
 
 - Ngày: 2026-11-02 (Asia/Saigon).
-- Phạm vi: `TABS-003` ("Bổ sung độ đàn hồi và tùy chỉnh (isometric, dolly, zoom, look) cho tab thứ 2") `done`, chưa commit. Trước đó `MOTION-002` (bỏ none), `MOTION-001` (triangular_cw và square_cw), `LOADING-001` (d02a0a2), `TABS-002` (92d7820), `BGUI-001` (dc3adf0), `INTENSITY-001`/`EDGES-002` (7980a5c) `done`. Không còn mục `in_progress`.
+- Phạm vi: `SENSOR-005` ("Tinh chỉnh tăng nhẹ tốc độ tự hồi tâm của parallax cảm biến") `done`, chưa commit. Trước đó `SENSOR-004`, `SENSOR-003`, `SENSOR-002`, `SENSOR-001` (parallax nghiêng và lắc), `TABS-003` (độ đàn hồi Tab 2), `MOTION-002` (bỏ none), `MOTION-001` (triangular_cw và square_cw), `LOADING-001` (d02a0a2), `TABS-002` (92d7820), `BGUI-001` (dc3adf0), `INTENSITY-001`/`EDGES-002` (7980a5c) `done`. Không còn mục `in_progress`.
 - Thực hiện:
-  - Thêm thông số `elasticity` (0.0..1.0, mặc định 0.5) vào `MotionLimits` và `SpatialSceneConfig` (hỗ trợ `sanitized()`, `toJson()`, `fromJson()`).
-  - Cung cấp hàm `MotionLimits.springK(elasticity)` và `MotionLimits.dampC(elasticity)` ánh xạ độ đàn hồi sang độ cứng lò xo và độ cản dịu dao động Jelly (ở mức mặc định 0.5f giữ nguyên chuẩn baseline `springK = 65.0f` và `dampC = 2.8f`).
-  - Tích hợp `elasticity` vào mô phỏng vật lý Jelly trong `SpatialGLRenderer` (cả ODE cập nhật frame và xung lực búng tay `onTouchUp`).
-  - Cập nhật `MainScreen.kt`:
-    - Mở rộng điều kiện hiển thị thanh trượt `Zoom` và toàn bộ nhóm Look (`Isometric`, `Dolly`, `Blur`, `Vignette`, `Saturation`, `Contrast`, `Brightness`, `Sepia`) áp dụng cho cả 3 tab (`selectedBottomTab in 0..2`).
-    - Bổ sung thanh trượt `Độ đàn hồi:` (`0.0..1.0`, testTag `viewer_elasticity`) riêng cho tab thứ 2 (`selectedBottomTab == 1`).
-    - Kết nối `onUpdateElasticity` với `SpatialViewModel.updateElasticity`.
-  - Cập nhật kiểm thử:
-    - Thêm unit test `elasticityValuesAreClamped` và `elasticityControlsSpringKAndDampC` trong `MotionLimitsTest.kt`.
-    - Thêm instrumented test `tab2HasElasticityZoomAndLookControls` trong `ZoomControlsTest.kt` kiểm tra sự hiển thị của Zoom, Độ đàn hồi, Isometric, Dolly trên tab thứ 2 và thao tác kéo thanh trượt.
+  - Tinh chỉnh tăng nhẹ tốc độ tự hồi tâm trong `SpatialGLRenderer.kt`:
+    - Nâng `recenterRate` lên `1.95f`.
+    - Đặt `restingBoost = 1.65f` khi cảm biến giữ ổn định (`motionSpeed < 0.32f`), cho tốc độ hồi tâm hiệu dụng khoảng `~3.22f/s`.
+    - Điều chỉnh trần `recenterAlpha` lên `0.22f`.
+    - Thời gian ảnh tự động trôi về trung tâm khi dừng nghiêng máy đạt khoảng **~0.55 – 0.60 giây**, phản hồi nhanh nhẹn và tự nhiên theo đúng yêu cầu.
 - Kết quả kiểm tra:
-  - Verify pass `.harness/runs/20261102T070216287Z-9a00ef46/result.json`: 51/51 JVM unit tests pass, Android Lint `lintDebug`, `assembleDebug`.
-  - Device pass `.harness/runs/20261102T070420154Z-e263825c/result.json` trên emulator-5554 (PGT-AN10 Android 9): 24/24 connected instrumentation tests passed, 0 failed, 0 skipped.
+  - Verify pass `.harness/runs/20261102T075104610Z-4c2c6e8c/result.json`: 53/53 JVM unit tests pass, Android Lint `lintDebug`, `assembleDebug`.
+  - Device pass `.harness/runs/20261102T075446513Z-c1db39a2/result.json` trên emulator-5554 (PGT-AN10 Android 9): 24/24 connected instrumentation tests passed, 0 failed, 0 skipped.
 - Chưa xác minh:
-  - Cảm nhận trực quan trực tiếp độ nảy đàn hồi khi kéo thả trên màn hình máy thật.
+  - Trải nghiệm trực tiếp trên tay máy thật Xiaomi Mi MIX 2.
 - Bước tiếp theo:
-  - Kiểm tra trực quan thao tác trên máy thật khi có sẵn.
+  - Trải nghiệm trực quan thao tác trên máy thật để xác nhận nhịp độ hồi tâm vừa ý.
