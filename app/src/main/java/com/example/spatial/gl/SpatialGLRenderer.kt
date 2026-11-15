@@ -10,80 +10,88 @@ import android.os.SystemClock
 import android.util.Log
 import com.example.spatial.data.MotionLimits
 import com.example.spatial.data.SpatialSceneConfig
-import java.util.concurrent.atomic.AtomicReference
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
-import kotlin.math.cos
+import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.hypot
 
+/**
+ * OpenGL ES 2.0 Renderer powered by the native C++ Adaptive 3D Triangle Mesh
+ * and Spring-Mass-Damper Lattice engine (SpatialModelBridge).
+ */
 class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
-    // A flat quad; all depth intersection is resolved per pixel in ParallaxShaders.
-    private val rayMarchMesh = SpatialMesh(gridWidth = 1, gridHeight = 1)
-    private val backgroundMesh = SpatialMesh(gridWidth = 100, gridHeight = 100)
-    private val foregroundMesh = SpatialMesh(gridWidth = 100, gridHeight = 100)
+
+    private val modelBridge = SpatialModelBridge()
+
     private var programHandle = 0
-    private var uViewProjectionMatrixHandle = 0
-    private var uModelMatrixHandle = 0
-    private var uSamplerHandle = 0
-    private var uDepthSamplerHandle = 0
-    private var uInpaintSamplerHandle = 0
-    private var uForegroundMaskHandle = 0
-    private var uOffsetHandle = 0
-    private var uDepthHeightHandle = 0
-    private var uNeutralHandle = 0
-    private var uAspectRatioHandle = 0
-    private var uImageAspectHandle = 0
-    private var uBgColorHandle = 0
-    private var uScaleTypeHandle = 0
-    private var uFillHandle = 0
-    private var uZoomHandle = 0
-    private var uPanHandle = 0
-    private var uStrengthHandle = 0
-    private var aPositionHandle = 0
-    private var aTextureSTHandle = 0
-    // Color image, depth field, inpainted background, and foreground alpha mask.
-    private val textureHandle = IntArray(4)
+    private var uViewProjectionMatrixHandle = -1
+    private var uModelMatrixHandle = -1
+    private var uSamplerHandle = -1
+    private var aPositionHandle = -1
+    private var aTextureSTHandle = -1
+
+    private val textureIds = IntArray(1)
+    private val vboIds = IntArray(2) // [0] = vertex VBO, [1] = index IBO
     private var hasTexture = false
-    // Matrices
+    private var hasMeshBuffers = false
+    private var allocatedVertexBytes = 0
+
     private val projectionMatrix = FloatArray(16)
     private val viewMatrix = FloatArray(16)
     private val viewProjectionMatrix = FloatArray(16)
     private val modelMatrix = FloatArray(16)
-    // Current scene & texture updates
+
     var currentBitmap: Bitmap? = null
         private set
-    // Called on the GL thread after the first frame of a newly uploaded bitmap has been drawn.
+
     @Volatile
     var onSceneDrawn: ((Bitmap) -> Unit)? = null
     private var undrawnBitmap: Bitmap? = null
+
     private var currentDepthMap: ByteArray? = null
     private var currentDepthWidth = 504
     private var currentDepthHeight = 504
-    private var layerBitmaps: Array<Bitmap?> = arrayOf(null, null)
-    private var hasSeparatedLayers = false
+    private var activeBitmapWidth = 1
+    private var activeBitmapHeight = 1
+
     @Volatile
     private var needsTextureReload = false
     @Volatile
     private var needsDepthReload = false
-    private var activeBitmapWidth = 1
-    private var activeBitmapHeight = 1
-    // Scene configuration
+
     @Volatile
     var sceneConfig = SpatialSceneConfig()
-        set(value) { field = value.sanitized() }
-    // Active bottom tab mode:
-    // 0 = Rotate (Rotational Tilt), 1 = Shake (Dynamic Jelly Physics), 2 = Animations, 3 = ZoomPan
+        set(value) {
+            field = value.sanitized()
+        }
+
+    // 0 = Rotate, 1 = Shake, 2 = Animations, 3 = ZoomPan
     @Volatile
     var activeTabMode = 0
-    // Legacy entry point: every app surface now uses Fit, including wallpaper.
+        set(value) {
+            if (field != value) {
+                field = value
+                if (value == 1) {
+                    modelBridge.resetPhysics()
+                }
+            }
+        }
+
+    // Legacy compatibility property
     var fitImage: Boolean
-        get() = sceneConfig.imageFitMode == com.example.spatial.data.ImageFitMode.FIT
-        set(value) { sceneConfig = sceneConfig.copy(imageFitMode = com.example.spatial.data.ImageFitMode.FIT) }
-    // Sensor inputs (from Gyroscope / Accelerometer)
+        get() = true
+        set(@Suppress("UNUSED_PARAMETER") value) {
+            sceneConfig = sceneConfig.copy(imageFitMode = com.example.spatial.data.ImageFitMode.FIT)
+        }
+
+    // Sensor tilt inputs
     @Volatile
     var gyroX = 0.0f
     @Volatile
     var gyroY = 0.0f
-    // Touch inputs (from drag & pinch gestures)
+
+    // Touch inputs
     @Volatile
     var touchDragX = 0.0f
     @Volatile
@@ -91,420 +99,355 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     @Volatile
     var touchZoom = 0.0f
     @Volatile
+    var touchPanX = 0.0f
+    @Volatile
+    var touchPanY = 0.0f
+    @Volatile
     var isTouching = false
-    // Jelly / Jello Physics State (Tab 1: Dynamic spring-mass-damper lattice)
-    @Volatile
-    var jellyDisplacementX = 0.0f
-    @Volatile
-    var jellyDisplacementY = 0.0f
-    @Volatile
-    var jellyVelocityX = 0.0f
-    @Volatile
-    var jellyVelocityY = 0.0f
-    @Volatile
-    var jellyWavePhase = 0.0f
-    // Auto-centering neutral tracking for sensor orientation
-    private var gyroNeutralX = 0.0f
-    private var gyroNeutralY = 0.0f
-    private var prevRawGyroX = 0.0f
-    private var prevRawGyroY = 0.0f
-    // Smooth movement state (Direct exponential LERP smoothing without spring bounce)
+
     private var smoothTiltX = 0.0f
     private var smoothTiltY = 0.0f
+    private var prevGyroX = 0.0f
+    private var prevGyroY = 0.0f
+    private var gyroNeutralX = 0.0f
+    private var gyroNeutralY = 0.0f
 
-    /**
-     * Soft saturation curve: linear near center, smoothly compresses near +/-1.0 without hard clipping.
-     */
-    private fun softCompress(value: Float): Float {
-        val clamped = value.coerceIn(-3.0f, 3.0f)
-        return (clamped / kotlin.math.sqrt(1.0f + 0.35f * clamped * clamped)).coerceIn(-1.0f, 1.0f)
+    @Volatile
+    private var pendingImpulseX = 0.0f
+    @Volatile
+    private var pendingImpulseY = 0.0f
+
+    private var lastFrameTimeMs = 0L
+    private var animStartTimeMs = 0L
+    private var viewportWidth = 1
+    private var viewportHeight = 1
+
+    fun setSceneData(
+        bitmap: Bitmap?,
+        depthData: ByteArray?,
+        config: SpatialSceneConfig,
+        depthWidth: Int = 504,
+        depthHeight: Int = 504
+    ) {
+        if (bitmap == null) return
+        synchronized(this) {
+            currentBitmap = bitmap
+            undrawnBitmap = bitmap
+            activeBitmapWidth = bitmap.width.coerceAtLeast(1)
+            activeBitmapHeight = bitmap.height.coerceAtLeast(1)
+            currentDepthMap = depthData
+            currentDepthWidth = depthWidth.coerceAtLeast(1)
+            currentDepthHeight = depthHeight.coerceAtLeast(1)
+            sceneConfig = config
+            needsTextureReload = true
+            needsDepthReload = true
+            touchDragX = 0.0f
+            touchDragY = 0.0f
+            touchZoom = 0.0f
+            touchPanX = 0.0f
+            touchPanY = 0.0f
+            smoothTiltX = 0.0f
+            smoothTiltY = 0.0f
+            animStartTimeMs = SystemClock.uptimeMillis()
+        }
     }
-    private var velocityX = 0.0f
-    private var velocityY = 0.0f
-    private var viewWidth = 1
-    private var viewHeight = 1
-    private var lastFrameTime = 0L
-    private val patternSample = FloatArray(3)
-    fun onTouchDown(x: Float, y: Float) {
+
+    fun onTouchDown(@Suppress("UNUSED_PARAMETER") x: Float, @Suppress("UNUSED_PARAMETER") y: Float) {
         isTouching = true
     }
-    fun onTouchMove(dx: Float, dy: Float, x: Float, y: Float) {
-        if (activeTabMode == 1) {
-            // Tab 1: Direct squishy drag into jelly spring with clamped amplitude
-            jellyDisplacementX = (jellyDisplacementX + dx * 2.5f).coerceIn(-1.0f, 1.0f)
-            jellyDisplacementY = (jellyDisplacementY + dy * 2.5f).coerceIn(-1.0f, 1.0f)
+
+    fun onTouchMove(dx: Float, dy: Float, @Suppress("UNUSED_PARAMETER") x: Float, @Suppress("UNUSED_PARAMETER") y: Float) {
+        if (activeTabMode == 3) {
+            touchPanX = (touchPanX + dx * 2.0f).coerceIn(-1.0f, 1.0f)
+            touchPanY = (touchPanY - dy * 2.0f).coerceIn(-1.0f, 1.0f)
         } else {
-            touchDragX = (touchDragX + dx * 2.5f).coerceIn(-1.0f, 1.0f)
-            touchDragY = (touchDragY + dy * 2.5f).coerceIn(-1.0f, 1.0f)
+            touchDragX = (touchDragX + dx * 1.6f).coerceIn(-1.0f, 1.0f)
+            touchDragY = (touchDragY - dy * 1.6f).coerceIn(-1.0f, 1.0f)
         }
     }
-    fun onTouchUp(releaseVx: Float, releaseVy: Float) {
+
+    fun onTouchUp(velocityX: Float, velocityY: Float) {
         isTouching = false
         if (activeTabMode == 1) {
-            // Impart release flick velocity into the mass-spring jelly oscillator
-            val e = sceneConfig.elasticity.coerceIn(MotionLimits.MIN_ELASTICITY, MotionLimits.MAX_ELASTICITY)
-            val velFactor = 1.2f + 2.0f * e
-            jellyVelocityX = (releaseVx * velFactor).coerceIn(-18.0f, 18.0f)
-            jellyVelocityY = (releaseVy * velFactor).coerceIn(-18.0f, 18.0f)
+            val vx = velocityX.coerceIn(-8.0f, 8.0f)
+            val vy = (-velocityY).coerceIn(-8.0f, 8.0f)
+            pendingImpulseX += vx * 0.14f
+            pendingImpulseY += vy * 0.14f
         }
     }
-    /**
-     * Clears motion offsets; motion-tab switches can retain the current pinch zoom.
-     */
+
     fun resetTouchState(preserveZoom: Boolean = false) {
-        if (!preserveZoom) touchZoom = 0.0f
         touchDragX = 0.0f
         touchDragY = 0.0f
-        smoothTiltX = 0.0f
-        smoothTiltY = 0.0f
-        velocityX = 0.0f
-        velocityY = 0.0f
-        jellyDisplacementX = 0.0f
-        jellyDisplacementY = 0.0f
-        jellyVelocityX = 0.0f
-        jellyVelocityY = 0.0f
+        if (!preserveZoom) {
+            touchZoom = 0.0f
+        }
+        touchPanX = 0.0f
+        touchPanY = 0.0f
         gyroNeutralX = gyroX
         gyroNeutralY = gyroY
-    }
-    fun setSceneData(bitmap: Bitmap?, depthData: ByteArray?, config: SpatialSceneConfig, depthWidth: Int = 504, depthHeight: Int = 504) {
-        sceneConfig = config.sanitized()
-        currentBitmap = bitmap
-        currentDepthMap = depthData?.takeIf { depthWidth > 0 && depthHeight > 0 && it.size == depthWidth * depthHeight }
-        currentDepthWidth = depthWidth
-        currentDepthHeight = depthHeight
-        needsTextureReload = true
-        needsDepthReload = true
+        modelBridge.resetPhysics()
     }
 
-    private fun buildLayers(bitmap: Bitmap, depth: ByteArray?): LayerBuilder.LayerData? {
-        if (depth == null || depth.size != currentDepthWidth * currentDepthHeight) return null
-        val pixels = IntArray(bitmap.width * bitmap.height)
-        bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
-        return LayerBuilder.buildLayers(pixels, bitmap.width, bitmap.height, depth, currentDepthWidth, currentDepthHeight)
-    }
-
-    private fun createDepthBitmap(depth: ByteArray?, width: Int, height: Int, packed: IntArray?): Bitmap {
-        val safeWidth = width.coerceAtLeast(1)
-        val safeHeight = height.coerceAtLeast(1)
-        val pixels = packed ?: IntArray(safeWidth * safeHeight)
-        if (packed == null) {
-            for (i in pixels.indices) {
-                val value = depth?.getOrNull(i)?.toInt()?.and(0xFF) ?: 0
-                pixels[i] = 0xFF000000.toInt() or (value shl 16) or (value shl 8) or value
-            }
-        }
-        return Bitmap.createBitmap(pixels, safeWidth, safeHeight, Bitmap.Config.ARGB_8888)
-    }
-
-    private fun createOpaqueMask(width: Int, height: Int): Bitmap =
-        Bitmap.createBitmap(
-            IntArray(width * height) { 0xFFFFFFFF.toInt() },
-            width,
-            height,
-            Bitmap.Config.ARGB_8888
-        )
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
-        hasTexture = false
-        needsTextureReload = true
-        needsDepthReload = true
         GLES20.glClearColor(0.06f, 0.06f, 0.09f, 1.0f)
         GLES20.glDisable(GLES20.GL_DEPTH_TEST)
-        GLES20.glEnable(GLES20.GL_BLEND)
-        GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA)
-        // Intersect the depth field per pixel; this preserves object contours instead of bending
-        // the entire photo through a displaced triangle mesh.
-        programHandle = ShaderHelper.createProgram(ParallaxShaders.VERTEX, ParallaxShaders.FRAGMENT)
-        if (programHandle != 0) {
-            uSamplerHandle = GLES20.glGetUniformLocation(programHandle, "image")
-            uDepthSamplerHandle = GLES20.glGetUniformLocation(programHandle, "uDepthMap")
-            uInpaintSamplerHandle = GLES20.glGetUniformLocation(programHandle, "uInpaint")
-            uForegroundMaskHandle = GLES20.glGetUniformLocation(programHandle, "uForegroundMask")
-            uOffsetHandle = GLES20.glGetUniformLocation(programHandle, "uOffset")
-            uDepthHeightHandle = GLES20.glGetUniformLocation(programHandle, "uDepthHeight")
-            uNeutralHandle = GLES20.glGetUniformLocation(programHandle, "uNeutral")
-            uAspectRatioHandle = GLES20.glGetUniformLocation(programHandle, "uAspectRatio")
-            uImageAspectHandle = GLES20.glGetUniformLocation(programHandle, "uImageAspect")
-            uBgColorHandle = GLES20.glGetUniformLocation(programHandle, "uBgColor")
-            uScaleTypeHandle = GLES20.glGetUniformLocation(programHandle, "uScaleType")
-            uFillHandle = GLES20.glGetUniformLocation(programHandle, "uFill")
-            uZoomHandle = GLES20.glGetUniformLocation(programHandle, "uZoom")
-            uPanHandle = GLES20.glGetUniformLocation(programHandle, "uPan")
-            uStrengthHandle = GLES20.glGetUniformLocation(programHandle, "uStrength")
-            aPositionHandle = GLES20.glGetAttribLocation(programHandle, "position")
-            aTextureSTHandle = GLES20.glGetAttribLocation(programHandle, "textureST")
+        GLES20.glDisable(GLES20.GL_CULL_FACE)
+
+        val vertSrc = ShaderHelper.loadShaderFromAssets(context, "shaders/mesh_default.vert")
+        val fragSrc = ShaderHelper.loadShaderFromAssets(context, "shaders/mesh_default.frag")
+        programHandle = ShaderHelper.createProgram(vertSrc, fragSrc)
+        if (programHandle == 0) {
+            Log.e(TAG, "Failed to create mesh shader program")
+            return
         }
-        // Initialize texture object
-        GLES20.glGenTextures(textureHandle.size, textureHandle, 0)
-        textureHandle.forEach { handle ->
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, handle)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+
+        uViewProjectionMatrixHandle = GLES20.glGetUniformLocation(programHandle, "uViewProjectionMatrix")
+        uModelMatrixHandle = GLES20.glGetUniformLocation(programHandle, "uModelMatrix")
+        uSamplerHandle = GLES20.glGetUniformLocation(programHandle, "uSampler")
+        aPositionHandle = GLES20.glGetAttribLocation(programHandle, "aPosition")
+        aTextureSTHandle = GLES20.glGetAttribLocation(programHandle, "aTextureST")
+
+        GLES20.glGenTextures(1, textureIds, 0)
+        GLES20.glGenBuffers(2, vboIds, 0)
+        hasMeshBuffers = vboIds[0] != 0 && vboIds[1] != 0
+
+        Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, 2.0f, 0f, 0f, 0f, 0f, 1f, 0f)
+
+        lastFrameTimeMs = SystemClock.uptimeMillis()
+        animStartTimeMs = lastFrameTimeMs
+
+        synchronized(this) {
+            if (currentBitmap != null) needsTextureReload = true
+            if (currentDepthMap != null || currentBitmap != null) needsDepthReload = true
         }
-        lastFrameTime = SystemClock.uptimeMillis()
-        Log.d("SpatialGLRenderer", "onSurfaceCreated finished: prog=$programHandle, tex=${textureHandle[0]}")
     }
+
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
-        viewWidth = width
-        viewHeight = height
-        GLES20.glViewport(0, 0, width, height)
-        val aspect = if (height > 0) width.toFloat() / height.toFloat() else 1.0f
-        Matrix.perspectiveM(projectionMatrix, 0, 45.0f, aspect, 0.1f, 100.0f)
+        viewportWidth = width.coerceAtLeast(1)
+        viewportHeight = height.coerceAtLeast(1)
+        GLES20.glViewport(0, 0, viewportWidth, viewportHeight)
+        updateProjectionMatrix()
     }
+
+    private fun updateProjectionMatrix() {
+        val viewAspect = viewportWidth.toFloat() / viewportHeight.toFloat()
+        val imageAspect = activeBitmapWidth.toFloat() / activeBitmapHeight.toFloat()
+        if (viewAspect >= imageAspect) {
+            Matrix.orthoM(projectionMatrix, 0, -viewAspect, viewAspect, -1f, 1f, 0.1f, 10f)
+        } else {
+            val halfH = imageAspect / viewAspect
+            Matrix.orthoM(projectionMatrix, 0, -imageAspect, imageAspect, -halfH, halfH, 0.1f, 10f)
+        }
+        Matrix.multiplyMM(viewProjectionMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+    }
+
     override fun onDrawFrame(gl: GL10?) {
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
-        // Upload the color image and its depth field.  The shader performs the parallax lookup
-        // per pixel, so no foreground/background texture is stretched by mesh interpolation.
-        val bmp = currentBitmap
-        if ((needsTextureReload || needsDepthReload) && bmp != null && !bmp.isRecycled) {
-            needsTextureReload = false
-            needsDepthReload = false
-            activeBitmapWidth = bmp.width
-            activeBitmapHeight = bmp.height
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0])
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bmp, 0)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[1])
-            val layers = buildLayers(bmp, currentDepthMap)
-            hasSeparatedLayers = layers != null
-            val depthBitmap = createDepthBitmap(currentDepthMap, currentDepthWidth, currentDepthHeight, layers?.depthTexture)
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, depthBitmap, 0)
-            depthBitmap.recycle()
-            val inpaint = layers?.let { Bitmap.createBitmap(it.layers[0], bmp.width, bmp.height, Bitmap.Config.ARGB_8888) } ?: bmp
-            val foregroundMask = layers?.let { Bitmap.createBitmap(it.layers[1], bmp.width, bmp.height, Bitmap.Config.ARGB_8888) }
-                ?: createOpaqueMask(bmp.width, bmp.height)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[2])
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, inpaint, 0)
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[3])
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, foregroundMask, 0)
-            if (inpaint !== bmp) inpaint.recycle()
-            foregroundMask.recycle()
-            hasTexture = true
-            undrawnBitmap = bmp
-            Log.d("SpatialGLRenderer", "Ray-march depth textures loaded: ${bmp.width}x${bmp.height}")
-        }
-        if (programHandle == 0 || !hasTexture) return
-        val now = SystemClock.uptimeMillis()
-        val dt = if (lastFrameTime > 0) ((now - lastFrameTime) / 1000.0f).coerceIn(0.001f, 0.05f) else 0.016f
-        lastFrameTime = now
-        // Calculate animation pattern shift matching rk0.O(Z) and performAnimatedUpdate (0x1439c)
-        val speedSlider = sceneConfig.speed.coerceIn(0.0f, 1.0f)
-        val cycleDurationMs = (1000.0f + (1.0f - speedSlider) * 6000.0f).coerceAtLeast(1000.0f)
-        val progress = (now % cycleDurationMs.toLong()).toFloat() / cycleDurationMs
-        val cycle = progress * 2.0f * Math.PI.toFloat()
-        val animIntensity = 0.65f * (0.4f + 0.7f * sceneConfig.intensity.coerceIn(0.0f, 1.25f))
-        MotionPattern.sample(sceneConfig.patternId, cycle, animIntensity, patternSample)
-        val animX = patternSample[0]
-        val animY = patternSample[1]
-        val animationZoom = if (activeTabMode == 2 && !patternSample[2].isNaN()) patternSample[2] else 0f
-        // Invert factor
-        val invertMult = if (sceneConfig.rInverted) -1.0f else 1.0f
-        val rawGx = gyroX
-        val rawGy = gyroY
-        val gyroVx = if (dt > 0.0001f) (rawGx - prevRawGyroX) / dt else 0.0f
-        val gyroVy = if (dt > 0.0001f) (rawGy - prevRawGyroY) / dt else 0.0f
-        prevRawGyroX = rawGx
-        prevRawGyroY = rawGy
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        if (programHandle == 0) return
 
-        // Responsive auto-centering: smoothly drifts the neutral point toward resting posture.
-        // Fine-tuned recovery: swiftly and smoothly returns to neutral within ~0.55s - 0.60s when device is resting.
-        val motionSpeed = kotlin.math.hypot(gyroVx, gyroVy)
-        val offsetDistance = kotlin.math.hypot(rawGx - gyroNeutralX, rawGy - gyroNeutralY)
-        val restingBoost = if (motionSpeed < 0.32f) 1.65f else (1.0f / (1.0f + motionSpeed * 1.5f)).coerceIn(0.4f, 1.0f)
-        val edgeBoost = 1.0f + offsetDistance * 1.4f
-        val recenterRate = 1.95f * restingBoost * edgeBoost
-        val recenterAlpha = (recenterRate * dt).coerceIn(0.0f, 0.22f)
-        gyroNeutralX += (rawGx - gyroNeutralX) * recenterAlpha
-        gyroNeutralY += (rawGy - gyroNeutralY) * recenterAlpha
+        val nowMs = SystemClock.uptimeMillis()
+        val dt = ((nowMs - lastFrameTimeMs) / 1000.0f).coerceIn(0.001f, 0.05f)
+        lastFrameTimeMs = nowMs
 
-        val centeredGx = rawGx - gyroNeutralX
-        val centeredGy = rawGy - gyroNeutralY
+        val drawnBitmapCandidate: Bitmap?
+        val cfg: SpatialSceneConfig
+        val tabMode = activeTabMode
 
-        var targetTiltX: Float
-        var targetTiltY: Float
-        val isJelly = (activeTabMode == 1)
-        if (isJelly) {
-            // Tab 1: Authentic Jelly / Jello Physics Simulation
-            if (!isTouching) {
-                // Feed shake motion (sudden device movement) into jelly mass-spring oscillator
-                val shakeMagnitude = kotlin.math.hypot(gyroVx, gyroVy)
-                if (shakeMagnitude > 0.8f) {
-                    val shakeMultiplier = (0.7f + 0.8f * sceneConfig.elasticity).coerceIn(0.5f, 2.0f)
-                    val impulseX = (gyroVx * shakeMultiplier * 0.9f * invertMult).coerceIn(-15.0f, 15.0f)
-                    val impulseY = (gyroVy * shakeMultiplier * 0.9f * invertMult).coerceIn(-15.0f, 15.0f)
-                    jellyVelocityX = (jellyVelocityX - impulseX).coerceIn(-18.0f, 18.0f)
-                    jellyVelocityY = (jellyVelocityY - impulseY).coerceIn(-18.0f, 18.0f)
+        synchronized(this) {
+            cfg = sceneConfig
+            val bmp = currentBitmap
+            if (needsTextureReload && bmp != null && !bmp.isRecycled) {
+                uploadTexture(bmp)
+                hasTexture = true
+                needsTextureReload = false
+                updateProjectionMatrix()
+            }
+
+            if (needsDepthReload) {
+                val aspect = activeBitmapWidth.toFloat() / activeBitmapHeight.toFloat()
+                val depthBytes = currentDepthMap ?: ByteArray(16) { 128.toByte() }
+                val dw = if (currentDepthMap != null) currentDepthWidth else 4
+                val dh = if (currentDepthMap != null) currentDepthHeight else 4
+                if (modelBridge.initializeMesh(depthBytes, dw, dh, aspect, gridSize = 96)) {
+                    uploadIndexBuffer()
                 }
+                needsDepthReload = false
+            }
 
-                // Mass-spring-damper harmonic ODE: F = -k * pos - c * vel
-                val springK = MotionLimits.springK(sceneConfig.elasticity)
-                val dampC = MotionLimits.dampC(sceneConfig.elasticity)
-                val forceX = -jellyDisplacementX * springK - jellyVelocityX * dampC
-                val forceY = -jellyDisplacementY * springK - jellyVelocityY * dampC
-                jellyVelocityX += forceX * dt
-                jellyVelocityY += forceY * dt
-                jellyDisplacementX += jellyVelocityX * dt
-                jellyDisplacementY += jellyVelocityY * dt
-                if (kotlin.math.abs(jellyDisplacementX) < 0.0005f && kotlin.math.abs(jellyVelocityX) < 0.001f) {
-                    jellyDisplacementX = 0.0f
-                    jellyVelocityX = 0.0f
-                }
-                if (kotlin.math.abs(jellyDisplacementY) < 0.0005f && kotlin.math.abs(jellyVelocityY) < 0.001f) {
-                    jellyDisplacementY = 0.0f
-                    jellyVelocityY = 0.0f
-                }
-            }
-            val speedMag = kotlin.math.hypot(jellyVelocityX, jellyVelocityY)
-            jellyWavePhase += speedMag * dt * 12.0f
-            val baseTiltX = softCompress(centeredGx * 1.35f * invertMult)
-            val baseTiltY = softCompress(centeredGy * 1.35f * invertMult)
-            targetTiltX = (jellyDisplacementX + baseTiltX).coerceIn(-1.0f, 1.0f)
-            targetTiltY = (jellyDisplacementY + baseTiltY).coerceIn(-1.0f, 1.0f)
-            // LERP smoothing to filter out sensor jitter
-            val jellyLerp = (1.0f - kotlin.math.exp(-22.0f * dt)).coerceIn(0.08f, 1.0f)
-            smoothTiltX += (targetTiltX - smoothTiltX) * jellyLerp
-            smoothTiltY += (targetTiltY - smoothTiltY) * jellyLerp
-        } else {
-            // Strictly reset any leftover jelly physics state so Jelly never leaks into other tabs
-            jellyDisplacementX = 0.0f
-            jellyDisplacementY = 0.0f
-            jellyVelocityX = 0.0f
-            jellyVelocityY = 0.0f
-            if (!isTouching && activeTabMode != 3) {
-                touchDragX *= 0.90f
-                touchDragY *= 0.90f
-                if (kotlin.math.abs(touchDragX) < 0.0005f) touchDragX = 0.0f
-                if (kotlin.math.abs(touchDragY) < 0.0005f) touchDragY = 0.0f
-            }
-            if (activeTabMode == 0) {
-                // Tab 0: Rotational Arc (Rotate) - Gyro + smooth touch drag
-                val sensorTiltX = softCompress(centeredGx * 1.35f * invertMult)
-                val sensorTiltY = softCompress(centeredGy * 1.35f * invertMult)
-                targetTiltX = (sensorTiltX + touchDragX).coerceIn(-1.0f, 1.0f)
-                targetTiltY = (sensorTiltY + touchDragY).coerceIn(-1.0f, 1.0f)
-            } else if (activeTabMode == 2) {
-                // Tab 2: Animations mode
-                val sensorTiltX = softCompress(centeredGx * 1.35f * invertMult)
-                val sensorTiltY = softCompress(centeredGy * 1.35f * invertMult)
-                targetTiltX = (sensorTiltX + touchDragX + animX).coerceIn(-1.0f, 1.0f)
-                targetTiltY = (sensorTiltY + touchDragY + animY).coerceIn(-1.0f, 1.0f)
-            } else {
-                // Tab 3: ZoomPan mode
-                targetTiltX = touchDragX
-                targetTiltY = touchDragY
-            }
-            // Direct exponential LERP smoothing: strictly NO spring oscillation or inertia bounce
-            val lerpFactor = (1.0f - kotlin.math.exp(-18.0f * dt)).coerceIn(0.05f, 1.0f)
-            smoothTiltX += (targetTiltX - smoothTiltX) * lerpFactor
-            smoothTiltY += (targetTiltY - smoothTiltY) * lerpFactor
-            velocityX = 0.0f
-            velocityY = 0.0f
+            drawnBitmapCandidate = if (hasTexture && undrawnBitmap != null) {
+                undrawnBitmap.also { undrawnBitmap = null }
+            } else null
         }
-        // Aspect ratios
-        val screenAspect = if (viewHeight > 0) viewWidth.toFloat() / viewHeight.toFloat() else 1.0f
-        val imageAspect = if (activeBitmapHeight > 0) activeBitmapWidth.toFloat() / activeBitmapHeight.toFloat() else screenAspect
-        val fovY = 45.0f
-        val baseDistance = 2.4f
-        // Base mesh geometry is strictly anchored to the reference camera frustum at Z=0.
-        // It does not depend on dynamic cameraZ or zoom, preventing perspective cancellation.
-        val baseVisibleHeight = 2.0f * baseDistance * kotlin.math.tan(Math.toRadians(fovY / 2.0)).toFloat()
-        val baseVisibleWidth = baseVisibleHeight * screenAspect
-        // Center-crop (Aspect Fill) with clean 25% safety margin to accommodate 3D perspective rotation
-        val margin = 1.25f
-        val meshWidth: Float
-        val meshHeight: Float
-        if (fitImage) {
-            // Aspect Fit: show the whole photo with a small border, parallax stays inside the frame.
-            if (screenAspect < imageAspect) {
-                meshWidth = baseVisibleWidth * FIT_FILL
-                meshHeight = meshWidth / imageAspect
-            } else {
-                meshHeight = baseVisibleHeight * FIT_FILL
-                meshWidth = meshHeight * imageAspect
-            }
-        } else if (screenAspect < imageAspect) {
-            // Screen is taller than image (phone portrait): match height, width extends horizontally
-            meshHeight = baseVisibleHeight * margin
-            meshWidth = meshHeight * imageAspect
-        } else {
-            // Screen is wider than image: match width, height extends vertically
-            meshWidth = baseVisibleWidth * margin
-            meshHeight = meshWidth / imageAspect
-        }
-        // Camera distance (cameraZ) handles the dynamic 2D/3D zoom scaling.
-        // When sliderZoom == 0f and touchZoom == 0f, zoomScale is strictly 1.0f,
-        // positioning the camera at baseDistance (2.4f) and returning the quad to 100% exact initial size.
-        val zoomScale = ViewerFraming.zoomScale(sceneConfig.zoom, activeTabMode, touchZoom, animationZoom)
-        val cameraZ = baseDistance / zoomScale
-        // Update mesh vertices with exact distortion-free dimensions and native C++ parameter formulas
-        val effectiveDepthCenter = ViewerFraming.depthCenter(sceneConfig.depthCenter)
-        // Flat clip-space rectangle for the ray-march shader.
-        rayMarchMesh.setUniformDepth(0.0f)
-        rayMarchMesh.updateMesh(
-            meshWidth = 2.0f,
-            meshHeight = 2.0f,
-            intensity = 0.0f,
-            depthCenter = 0.0f,
-            shiftZ = 0.0f,
-            zoom3D = 0.0f
+
+        if (!hasTexture || !modelBridge.isInitialized) return
+
+        // Update sensor smoothing and auto-centering
+        updateTiltState(dt, tabMode)
+
+        modelBridge.setProperties(
+            intensity = cfg.intensity,
+            depthCenter = cfg.depthCenter,
+            rInverted = cfg.rInverted,
+            zoom = cfg.zoom,
+            zoom3D = cfg.zoom3D,
+            elasticity = cfg.elasticity
         )
-        GLES20.glUseProgram(programHandle)
-        GLES20.glUniform1f(GLES20.glGetUniformLocation(programHandle, "uLayered"), if (hasSeparatedLayers) 1f else 0f)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0])
-        GLES20.glUniform1i(uSamplerHandle, 0)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE1)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[1])
-        GLES20.glUniform1i(uDepthSamplerHandle, 1)
-        GLES20.glUniform2f(GLES20.glGetUniformLocation(programHandle, "uDepthTexel"),
-            1f / currentDepthWidth.coerceAtLeast(1), 1f / currentDepthHeight.coerceAtLeast(1))
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE2)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[2])
-        GLES20.glUniform1i(uInpaintSamplerHandle, 2)
-        GLES20.glActiveTexture(GLES20.GL_TEXTURE3)
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[3])
-        GLES20.glUniform1i(uForegroundMaskHandle, 3)
-        GLES20.glUniform2f(uOffsetHandle, smoothTiltX.coerceIn(-1f, 1f), smoothTiltY.coerceIn(-1f, 1f))
-        GLES20.glUniform1f(uDepthHeightHandle, DepthProjection.depthHeight(sceneConfig.intensity))
-        GLES20.glUniform1f(uNeutralHandle, effectiveDepthCenter)
-        GLES20.glUniform1f(uAspectRatioHandle, screenAspect)
-        GLES20.glUniform1f(uImageAspectHandle, imageAspect)
-        GLES20.glUniform4f(uBgColorHandle, 0.06f, 0.06f, 0.09f, 1.0f)
-        GLES20.glUniform1f(uScaleTypeHandle, if (fitImage) 0.0f else 1.0f)
-        GLES20.glUniform1f(uFillHandle, FIT_FILL)
-        GLES20.glUniform1f(uZoomHandle, zoomScale)
-        GLES20.glUniform2f(uPanHandle, if (activeTabMode == 3) touchDragX * 0.25f else 0.0f, if (activeTabMode == 3) touchDragY * 0.25f else 0.0f)
-        GLES20.glUniform1f(uStrengthHandle, if (activeTabMode == 3) 0.0f else 1.0f)
-        ParallaxShaders.applyEffects(programHandle, sceneConfig)
-        rayMarchMesh.draw(aPositionHandle, aTextureSTHandle)
-        undrawnBitmap?.let { drawn ->
-            undrawnBitmap = null
-            onSceneDrawn?.invoke(drawn)
+
+        Matrix.setIdentityM(modelMatrix, 0)
+        when (tabMode) {
+            0 -> modelBridge.updateRotate(smoothTiltX, smoothTiltY)
+            1 -> {
+                val impX = pendingImpulseX
+                val impY = pendingImpulseY
+                pendingImpulseX = 0.0f
+                pendingImpulseY = 0.0f
+                if (impX != 0.0f || impY != 0.0f) {
+                    modelBridge.applyImpulse(impX, impY)
+                }
+                modelBridge.updateShake(dt, smoothTiltX, smoothTiltY)
+            }
+            2 -> {
+                val pattern = if (cfg.patternId.equals("none", ignoreCase = true)) "horizontal" else cfg.patternId
+                val cycleMs = LoopPlan.cycleMs(cfg.speed) * MotionPattern.periodCycles(pattern)
+                val elapsed = (nowMs - animStartTimeMs).toFloat()
+                val progress = ((elapsed % cycleMs) / cycleMs).coerceIn(0.0f, 1.0f)
+                modelBridge.updateAnimated(progress, MotionPattern.patternIdToNativeInt(pattern))
+            }
+            3 -> {
+                val z = (cfg.zoom + touchZoom).coerceIn(MotionLimits.MIN_ZOOM, 1.5f)
+                modelBridge.updateZoomPan(z, touchPanX, touchPanY)
+            }
+        }
+
+        drawMesh()
+
+        if (drawnBitmapCandidate != null) {
+            onSceneDrawn?.invoke(drawnBitmapCandidate)
         }
     }
-    companion object {
-        // Max sideways eye travel (world units) at full tilt.
-        private const val EYE_RANGE = 0.8f
-        // Fraction of the screen the photo occupies in fit mode.
-        private const val FIT_FILL = 0.88f
-        private const val DEFAULT_VERT_SHADER = """
-            uniform mat4 viewProjectionMatrix;
-            uniform mat4 modelMatrix;
-            attribute vec4 position;
-            attribute vec2 textureST;
-            varying vec2 textureCoords;
-            void main() {
-                gl_Position = viewProjectionMatrix * (modelMatrix * position);
-                textureCoords = textureST;
+
+    private fun updateTiltState(dt: Float, tabMode: Int) {
+        val gx = gyroX
+        val gy = gyroY
+
+        // Adaptive auto-centering toward resting posture
+        val gyroSpeed = hypot(gx - prevGyroX, gy - prevGyroY) / dt.coerceAtLeast(0.001f)
+        val restingBoost = if (gyroSpeed < 0.15f) 1.65f else 1.0f
+        val offsetDist = hypot(gx - gyroNeutralX, gy - gyroNeutralY)
+        val edgeBoost = 1.0f + offsetDist * 1.2f
+        val alpha = (1.95f * restingBoost * edgeBoost * dt).coerceAtMost(0.22f)
+        gyroNeutralX += (gx - gyroNeutralX) * alpha
+        gyroNeutralY += (gy - gyroNeutralY) * alpha
+
+        if (tabMode == 1) {
+            val dgx = (gx - prevGyroX) / dt.coerceAtLeast(0.001f)
+            val dgy = (gy - prevGyroY) / dt.coerceAtLeast(0.001f)
+            if (hypot(dgx, dgy) > 1.2f) {
+                pendingImpulseX += dgx * 0.04f
+                pendingImpulseY += dgy * 0.04f
             }
-        """
-        private const val DEFAULT_FRAG_SHADER = """
-            precision highp float;
-            uniform sampler2D sampler;
-            varying vec2 textureCoords;
-            void main() {
-                gl_FragColor = texture2D(sampler, textureCoords);
-            }
-        """
+        }
+        prevGyroX = gx
+        prevGyroY = gy
+
+        val rawX = softCompress((gx - gyroNeutralX) * 1.35f + touchDragX)
+        val rawY = softCompress((gy - gyroNeutralY) * 1.35f + touchDragY)
+
+        if (!isTouching && (abs(touchDragX) > 0.0001f || abs(touchDragY) > 0.0001f)) {
+            val decay = exp(-3.5f * dt)
+            touchDragX *= decay
+            touchDragY *= decay
+        }
+
+        val lerp = 1.0f - exp(-18.0f * dt)
+        smoothTiltX += (rawX - smoothTiltX) * lerp
+        smoothTiltY += (rawY - smoothTiltY) * lerp
+    }
+
+    private fun softCompress(v: Float): Float = v / (1.0f + 0.35f * abs(v))
+
+    private fun uploadTexture(bitmap: Bitmap) {
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+    }
+
+    private fun uploadIndexBuffer() {
+        val ib = modelBridge.indexBuffer ?: return
+        if (!hasMeshBuffers) return
+        ib.position(0)
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboIds[1])
+        GLES20.glBufferData(
+            GLES20.GL_ELEMENT_ARRAY_BUFFER,
+            modelBridge.indexCount * 2,
+            ib,
+            GLES20.GL_STATIC_DRAW
+        )
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+
+        val neededVBytes = modelBridge.vertexCount * 5 * 4
+        if (neededVBytes != allocatedVertexBytes) {
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboIds[0])
+            GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, neededVBytes, null, GLES20.GL_DYNAMIC_DRAW)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+            allocatedVertexBytes = neededVBytes
+        }
+    }
+
+    private fun drawMesh() {
+        val vb = modelBridge.vertexBuffer ?: return
+        if (!hasMeshBuffers) return
+
+        GLES20.glUseProgram(programHandle)
+        GLES20.glUniformMatrix4fv(uViewProjectionMatrixHandle, 1, false, viewProjectionMatrix, 0)
+        GLES20.glUniformMatrix4fv(uModelMatrixHandle, 1, false, modelMatrix, 0)
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
+        GLES20.glUniform1i(uSamplerHandle, 0)
+
+        vb.position(0)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboIds[0])
+        GLES20.glBufferSubData(GLES20.GL_ARRAY_BUFFER, 0, modelBridge.vertexCount * 5 * 4, vb)
+
+        val strideBytes = 5 * 4
+        GLES20.glEnableVertexAttribArray(aPositionHandle)
+        GLES20.glVertexAttribPointer(aPositionHandle, 3, GLES20.GL_FLOAT, false, strideBytes, 0)
+
+        GLES20.glEnableVertexAttribArray(aTextureSTHandle)
+        GLES20.glVertexAttribPointer(aTextureSTHandle, 2, GLES20.GL_FLOAT, false, strideBytes, 3 * 4)
+
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboIds[1])
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, modelBridge.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+
+        GLES20.glDisableVertexAttribArray(aPositionHandle)
+        GLES20.glDisableVertexAttribArray(aTextureSTHandle)
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+    }
+
+    fun release() {
+        modelBridge.destroy()
+        if (hasMeshBuffers) {
+            GLES20.glDeleteBuffers(2, vboIds, 0)
+            hasMeshBuffers = false
+        }
+        if (textureIds[0] != 0) {
+            GLES20.glDeleteTextures(1, textureIds, 0)
+            textureIds[0] = 0
+        }
+        if (programHandle != 0) {
+            GLES20.glDeleteProgram(programHandle)
+            programHandle = 0
+        }
+    }
+
+    private companion object {
+        const val TAG = "SpatialGLRenderer"
     }
 }

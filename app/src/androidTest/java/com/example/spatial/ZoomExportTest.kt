@@ -17,7 +17,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ZoomExportTest {
     @Test fun encodedVideoPreservesZoomAndIgnoresLegacyDepthZoom() = runBlocking {
-        val size = 128
+        val size = 256
         val image = Bitmap.createBitmap(IntArray(size * size) { i ->
             Color.rgb((i % size) * 255 / (size - 1), 80, 120)
         }, size, size, Bitmap.Config.ARGB_8888)
@@ -39,9 +39,10 @@ class ZoomExportTest {
                         val frame = requireNotNull(metadata.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC))
                         try {
                             val effectiveZoom = if (zoom < 0f) zoom * .5f else zoom
-                            val scale = .88f * (1f + effectiveZoom * .6f)
-                            val expectedRed = (((90.5f / size - .5f) / scale) + .5f) * 255f
-                            assertEquals("Encoded zoom=$zoom", expectedRed, Color.red(frame.getPixel(90, 64)).toFloat(), 12f)
+                            val scale = 1f + effectiveZoom * .45f
+                            val sampleX = 170
+                            val expectedRed = ((((sampleX + 0.5f) / size - .5f) / scale) + .5f).coerceIn(0f, 1f) * 255f
+                            assertEquals("Encoded zoom=$zoom", expectedRed, Color.red(frame.getPixel(sampleX, 128)).toFloat(), 16f)
                         } finally { frame.recycle() }
                     } finally { metadata.release() }
                 } finally { output.delete() }

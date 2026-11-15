@@ -86,11 +86,11 @@ class ViewerViewportLayoutTest {
         compose.onNodeWithContentDescription("Tune").performClick()
         assertEquals(initialHeight, assertViewportBounds())
         compose.onNodeWithContentDescription("Tune").performClick()
-        compose.onNodeWithContentDescription("ZoomPan").assertDoesNotExist()
-        for (tab in listOf("Rotate", "Animations", "Shake")) {
+        for (tab in listOf("Rotate", "Shake", "Animations", "ZoomPan")) {
             compose.onNodeWithContentDescription(tab).performClick()
             assertEquals("Tab $tab must retain the same viewport height", initialHeight, assertViewportBounds())
         }
+        compose.onNodeWithContentDescription("Rotate").performClick()
         // Exercise both width-limited and height-limited layouts using real scene changes.
         for ((width, height) in listOf(160 to 80, 96 to 96, 80 to 160)) {
             val image = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)

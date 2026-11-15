@@ -999,46 +999,48 @@ fun ViewerScreen(
                 Spacer(modifier = Modifier.weight(1f))
 
                 // Actions on the right
-                // Wallpaper
-                IconButton(onClick = onSetWallpaper) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_wallpaper_phone),
-                        contentDescription = "Set Wallpaper",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-
-                // Download / Save (Shown ONLY in Tab 2 Animations)
-                if (selectedBottomTab == 2) {
-                    IconButton(onClick = onSave) {
+                if (selectedBottomTab != 3) {
+                    // Wallpaper
+                    IconButton(onClick = onSetWallpaper) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_save_real),
-                            contentDescription = "Save",
+                            painter = painterResource(id = R.drawable.ic_wallpaper_phone),
+                            contentDescription = "Set Wallpaper",
                             tint = Color.White,
                             modifier = Modifier.size(24.dp)
                         )
                     }
 
-                    // Share (Shown ONLY in Tab 2 Animations)
-                    IconButton(onClick = onShare) {
+                    // Download / Save (Shown ONLY in Tab 2 Animations)
+                    if (selectedBottomTab == 2) {
+                        IconButton(onClick = onSave) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_save_real),
+                                contentDescription = "Save",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        // Share (Shown ONLY in Tab 2 Animations)
+                        IconButton(onClick = onShare) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_share_real),
+                                contentDescription = "Share",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+
+                    // Tune / Properties Sliders Toggle Icon
+                    IconButton(onClick = onToggleControls) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_share_real),
-                            contentDescription = "Share",
-                            tint = Color.White,
+                            painter = painterResource(id = R.drawable.ic_properties),
+                            contentDescription = "Tune",
+                            tint = if (showControls) Color(0xFF00A0E9) else Color.White,
                             modifier = Modifier.size(24.dp)
                         )
                     }
-                }
-
-                // Tune / Properties Sliders Toggle Icon
-                IconButton(onClick = onToggleControls) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_properties),
-                        contentDescription = "Tune",
-                        tint = if (showControls) Color(0xFF00A0E9) else Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
                 }
 
                 // Delete / Trash Icon
@@ -1281,25 +1283,6 @@ fun ViewerScreen(
                                 )
                             }
                         }
-
-                        // LOOK: depth blur, vignette and colour grade (not part of the original app)
-                        if (selectedBottomTab in 0..2) {
-                            HorizontalDivider(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 3.dp),
-                                thickness = 0.8.dp,
-                                color = Color.White.copy(alpha = 0.15f)
-                            )
-                            LookSlider("Isometric", config.isometric, 0f..1f) { v -> onUpdateConfig { it.copy(isometric = v) } }
-                            LookSlider("Dolly", config.dolly, -1f..1f) { v -> onUpdateConfig { it.copy(dolly = v) } }
-                            LookSlider("Blur", config.blur, 0f..1f) { v -> onUpdateConfig { it.copy(blur = v) } }
-                            LookSlider("Vignette", config.vignette, 0f..1f) { v -> onUpdateConfig { it.copy(vignette = v) } }
-                            LookSlider("Saturation", config.saturation, 0f..2f) { v -> onUpdateConfig { it.copy(saturation = v) } }
-                            LookSlider("Contrast", config.contrast, 0f..2f) { v -> onUpdateConfig { it.copy(contrast = v) } }
-                            LookSlider("Brightness", config.brightness, 0f..2f) { v -> onUpdateConfig { it.copy(brightness = v) } }
-                            LookSlider("Sepia", config.sepia, 0f..1f) { v -> onUpdateConfig { it.copy(sepia = v) } }
-                        }
                     }
                 }
             }
@@ -1382,9 +1365,10 @@ fun ViewerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     val tabs = listOf(
-                        Pair(R.drawable.ic_rotate_tab, "Shake"),
-                        Pair(R.drawable.ic_shake_tab, "Rotate"),
-                        Pair(R.drawable.ic_animations_tab, "Animations")
+                        Pair(R.drawable.ic_rotate_tab, "Rotate"),
+                        Pair(R.drawable.ic_shake_tab, "Shake"),
+                        Pair(R.drawable.ic_animations_tab, "Animations"),
+                        Pair(R.drawable.ic_zoom_pan_tab, "ZoomPan")
                     )
 
                     tabs.forEachIndexed { index, tab ->
@@ -1399,20 +1383,20 @@ fun ViewerScreen(
                                     onSelectBottomTab(index)
                                     when (index) {
                                         0 -> {
-                                            // Tab 0: Rotate (Rotational Tilt Parallax)
                                             if (!isSensorEnabled) onToggleSensor()
                                             onSelectPattern("none")
                                         }
                                         1 -> {
-                                            // Tab 1: Shake (Dynamic Jelly Physics)
                                             if (!isSensorEnabled) onToggleSensor()
                                             onSelectPattern("none")
                                         }
                                         2 -> {
-                                            // Tab 2: Animations mode
                                             if (config.patternId.isEmpty() || config.patternId.equals("none", ignoreCase = true)) {
                                                 onSelectPattern("horizontal")
                                             }
+                                        }
+                                        3 -> {
+                                            if (showControls) onToggleControls()
                                         }
                                     }
                                 },

@@ -139,6 +139,27 @@ object MotionPattern {
     fun periodCycles(patternId: String): Int =
         if (patternId.equals("spiral_cw", ignoreCase = true)) 2 else 1
 
+    /** Maps patternId string to native C++ PatternAnimations::PatternId enum integer. */
+    fun patternIdToNativeInt(patternId: String): Int = when (patternId.lowercase()) {
+        "horizontal" -> 1
+        "vertical" -> 2
+        "diagonal_bottom_top", "diagonal_bt" -> 3
+        "diagonal_top_bottom", "diagonal_tb" -> 4
+        "half_circle_bottom", "half_circle_b" -> 5
+        "half_circle_top", "half_circle_t" -> 6
+        "circular_cw", "circle_cw", "circle" -> 7
+        "circular_ccw", "circle_ccw" -> 8
+        "triangular_cw", "triangle", "triangular" -> 9
+        "square_cw", "square" -> 10
+        "square_ccw" -> 11
+        "eight_horizontal" -> 12
+        "eight_vertical" -> 13
+        "spiral_cw" -> 14
+        "horizontal_rapid" -> 15
+        "vertical_rapid" -> 16
+        else -> 0
+    }
+
     private const val SPIRAL_PERIOD = (4.0 * PI).toFloat()
     private const val TWO_PI = (2.0 * PI).toFloat()
     private const val PI_F = PI.toFloat()

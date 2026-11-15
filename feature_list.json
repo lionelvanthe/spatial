@@ -418,6 +418,24 @@
         "2026-11-02: Nâng nhẹ trần bù trừ mỗi frame recenterAlpha lên 0.22f, giúp chuyển động hồi tâm dứt khoát, mượt mà và tự nhiên đúng điểm cân bằng.",
         "2026-11-02: Verify pass .harness/runs/20261102T075104610Z-4c2c6e8c/result.json (53 unit tests, lintDebug, assembleDebug). Device pass .harness/runs/20261102T075446513Z-c1db39a2/result.json trên emulator-5554 Android 9 (24/24 connected tests passed, 0 failed, 0 skipped)."
       ]
+    },
+    {
+      "id": "REBUILD-001",
+      "title": "Xây lại ứng dụng Spatial 3D theo kiến trúc Adaptive 3D Mesh C++ NDK + Compose",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "Native C++ NDK engine (Adaptive 3D Triangle Mesh + Spring-Mass-Damper Lattice + 16 Pattern Animations) biên dịch và hoạt động qua JNI",
+        "OpenGL ES 2.0 renderer dùng chung cho Preview, Live Wallpaper và Video Export (MediaCodec MP4)",
+        "UI Jetpack Compose Material 3 với flow 3 màn hình: Gallery -> Setup ONNX Depth -> 3D Viewer (Rotate, Shake, Animations, ZoomPan)",
+        "Chạy ./scripts/harness.ps1 -Mode Verify (unit tests, lintDebug, assembleDebug) thành công"
+      ],
+      "evidence": [
+        "2026-11-15: Xây dựng native C++ engine (CMakeLists.txt, AdaptiveMeshBuilder, PatternAnimations, SpatialModelEngine, jni_bridge) biên dịch thành công cho arm64-v8a, armeabi-v7a, x86_64.",
+        "2026-11-15: Viết lại SpatialGLRenderer, VideoExporter và MainScreen (4 tab Rotate, Shake, Animations, ZoomPan) dùng SpatialModelBridge + mesh_default.vert/frag; xóa mã ray-marching cũ.",
+        "2026-11-15: ./scripts/harness.ps1 -Mode Verify PASS (D:\\android\\spatial\\.harness\\runs\\20261115T065125127Z-cc343c4d/result.json): testDebugUnitTest, lintDebug, assembleDebug.",
+        "2026-11-15: ./scripts/harness.ps1 -Mode Device PASS trên JSN-L22 - 10 (D:\\android\\spatial\\.harness\\runs\\20261115T070130742Z-819e61b2/result.json): toàn bộ connectedDebugAndroidTest gồm AdaptiveMeshRendererTest, DepthInferenceTest, SceneLoadingTest, ViewerViewportLayoutTest, ZoomControlsTest, ZoomExportTest đều pass. Đã kiểm tra trực quan ảnh chụp màn hình trên JSN-L22."
+      ]
     }
   ]
 }

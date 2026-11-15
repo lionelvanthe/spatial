@@ -18,8 +18,8 @@ class ViewerFramingTest {
 
     @Test fun allMotionTabsPreserveSceneZoom() {
         for (tab in 0..2) {
-            assertEquals(MotionLimits.MAX_ZOOM, ViewerFraming.effectiveZoom(0.7f, tab), 0f)
-            assertEquals(MotionLimits.MIN_ZOOM * 0.5f, ViewerFraming.effectiveZoom(-0.7f, tab), 0f)
+            assertEquals(MotionLimits.MAX_ZOOM, ViewerFraming.effectiveZoom(1.5f, tab), 0f)
+            assertEquals(MotionLimits.MIN_ZOOM * 0.5f, ViewerFraming.effectiveZoom(-1.5f, tab), 0f)
             assertEquals(0f, ViewerFraming.effectiveZoom(0f, tab), 0f)
         }
     }

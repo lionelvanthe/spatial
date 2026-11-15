@@ -1,6 +1,6 @@
 package com.example.spatial
 
-import com.example.spatial.gl.DepthProjection
+import com.example.spatial.gl.MotionPattern
 import com.example.spatial.sensor.RelativeTilt
 import org.junit.Assert.*
 import org.junit.Test
@@ -8,17 +8,29 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 class SpatialProjectionTest {
-    @Test fun zoomOffsetScalesWithDepthAndZoom3D() {
-        assertEquals(0f, DepthProjection.zoomOffset(0f, 0.3f, 1f), 0f)
-        assertEquals(0.3f, DepthProjection.zoomOffset(1f, 0.3f, 1f), 1e-6f)
-        assertEquals(0.15f, DepthProjection.zoomOffset(0.5f, 0.3f, 1f), 1e-6f)
-        // 3D zoom off: nothing is pushed, whatever the depth
-        assertEquals(0f, DepthProjection.zoomOffset(1f, 0.3f, 0f), 0f)
-    }
-
-    @Test fun zoomOffsetInputsAreClamped() {
-        assertEquals(0.3f, DepthProjection.zoomOffset(5f, 0.3f, 9f), 1e-6f)
-        assertEquals(0f, DepthProjection.zoomOffset(-2f, 0.3f, 1f), 0f)
+    @Test fun nativePatternMappingCoversAll16Patterns() {
+        val expected = mapOf(
+            "none" to 0,
+            "horizontal" to 1,
+            "vertical" to 2,
+            "diagonal_bottom_top" to 3,
+            "diagonal_top_bottom" to 4,
+            "half_circle_bottom" to 5,
+            "half_circle_top" to 6,
+            "circular_cw" to 7,
+            "circular_ccw" to 8,
+            "triangular_cw" to 9,
+            "square_cw" to 10,
+            "square_ccw" to 11,
+            "eight_horizontal" to 12,
+            "eight_vertical" to 13,
+            "spiral_cw" to 14,
+            "horizontal_rapid" to 15,
+            "vertical_rapid" to 16
+        )
+        for ((id, nativeId) in expected) {
+            assertEquals("Pattern $id", nativeId, MotionPattern.patternIdToNativeInt(id))
+        }
     }
 
     @Test fun relativeTiltWorksWhenPhoneIsUpright() {

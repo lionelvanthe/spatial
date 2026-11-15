@@ -1,14 +1,27 @@
 # Bàn giao hiện tại
 
-- Ngày: 2026-11-02 (Asia/Saigon).
-- Phạm vi: Kích hoạt photo picker trong Gallery (`onAddNewPhoto`) và sửa import `PickVisualMediaRequest`.
+- Ngày: 2026-11-15 (Asia/Saigon).
+- Phạm vi: Phân tích 2 file APK gốc (`com.vacuapps.photos3d.apk` + `config.arm64_v8a.apk`), xây dựng lại ứng dụng Spatial 3D theo kiến trúc **Adaptive 3D Triangle Mesh + Spring-Mass-Damper Lattice (C++ NDK/JNI) + Jetpack Compose Material 3**, và kiểm chứng trên thiết bị thật `JSN-L22`.
 - Thực hiện:
-  - Bổ sung `import androidx.activity.result.PickVisualMediaRequest` trong `MainScreen.kt`.
-  - Bỏ tiền tố lỗi `ActivityResultContracts.` trước `PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)` và bỏ comment lời gọi `imagePickerLauncher.launch(...)`.
-  - Nhấn nút "Add photo" trong Gallery hiện đã khởi chạy Photo Picker của hệ thống.
+  - **Native C++ Engine (`app/src/main/cpp/`)**:
+    - `CMakeLists.txt`, `AdaptiveMeshBuilder`, `PatternAnimations` (16 pattern), `SpatialModelEngine` (lưới thích ứng + Spring-Mass-Damper từng đỉnh), `jni_bridge.cpp`.
+  - **OpenGL ES 2.0 & Export**:
+    - `SpatialModelBridge.kt`, `mesh_default.vert`, `mesh_default.frag`, `SpatialGLRenderer.kt` (VBO/IBO `glDrawElements`), `VideoExporter.kt` (`FrameRenderer` dùng chung `SpatialModelBridge`).
+    - Xóa mã ray-marching cũ (`LayerBuilder.kt`, `ParallaxShaders.kt`, `DepthProjection.kt`, `SpatialMesh.kt`) và test ray-marching cũ.
+  - **UI (`MainScreen.kt`)**: Khôi phục 4 tab (`Rotate`, `Shake`, `Animations`, `ZoomPan`), sửa icon/nhãn Tab 0 & Tab 1, bỏ `LookSlider` dư thừa.
+  - **Tests**:
+    - Unit tests: `MotionLimitsTest.kt`, `SpatialProjectionTest.kt`.
+    - Android instrumentation tests: Thêm `AdaptiveMeshRendererTest.kt` (kiểm tra adaptive vertex reduction, spring impulse physics, và render không lộ viền đen khi nghiêng mạnh), cập nhật `ViewerViewportLayoutTest.kt`, `ZoomControlsTest.kt`, `ZoomExportTest.kt` (dùng `size = 256` tương thích hardware H.264 encoder).
 - Kết quả kiểm tra:
-  - Verify pass `.harness/runs/20261102T081630431Z-fd16276c/result.json`: 53/53 JVM unit tests pass, Android Lint `lintDebug`, `assembleDebug`.
-- Chưa xác minh:
-  - Thao tác chọn ảnh trực quan trên thiết bị thật / emulator.
+  - `./scripts/harness.ps1 -Mode Verify`: PASS (`D:\android\spatial\.harness\runs\20261115T094611273Z-21a37cc8/result.json`).
+  - `./scripts/harness.ps1 -Mode Device` trên `JSN-L22 - 10`: PASS (`D:\android\spatial\.harness\runs\20261115T094734965Z-bd701d6a/result.json`).
+  - Sửa triệt để lỗi phình/méo vật thể ở Cường độ cao bằng **Edge-Preserving Bilateral Filter + `orthoM`**:
+    - `AdaptiveMeshBuilder.cpp`: Thay box-blur cũ bằng 2 pass **Bilateral Filter** (`radius=3`, `sigmaS=2.5`, `sigmaR=0.12`) để san đều độ sâu nội bộ khuôn mặt/chủ thể (di chuyển như khối cứng) nhưng giữ nguyên vách tách lớp sắc nét giữa chủ thể và nền, kèm 1 pass kẹp gradient nhẹ (`MAX_DEPTH_GRAD = 0.065f`) và ghim biên `edgeWeight` (`0.025f`).
+    - `SpatialModelEngine.cpp`: Trả `pz = cd * 0.023f` (khớp `libPhotos3DModelManager.so` gốc) để không gây biến dạng mắt cá khi đứng yên, giữ `computeDepthScale = 0.55f + 0.55f * clamped` và soft-cap `maxShift <= 0.042f`.
+    - `SpatialGLRenderer.kt`: Trả `updateProjectionMatrix()` về `Matrix.orthoM`, tắt `GL_DEPTH_TEST`, bỏ `scaleM` và `rotateM` tấm ảnh.
+  - Kiểm tra trực quan trên `JSN-L22`: Đã kiểm tra ảnh ở trạng thái tĩnh Cường độ min (`pup_min.png`) vs Cường độ max (`pup_max.png`) và khi vuốt ngang (`pup_max_swipe.png`) — ảnh ở Cường độ min và max giống hệt nhau khi đứng yên (không phình méo), và khi vuốt vẫn tách khối rõ rệt, kín 4 viền.
+- Chưa xác minh / Lưu ý:
+  - Chưa kiểm tra trực quan Live Wallpaper trên màn hình chính (`WALLPAPER-001`) và cảm biến nghiêng vật lý bằng tay trên thiết bị thật.
+  - Tab `Gallery` mặc định chưa hiển thị 3 scene `Sample` (các scene mẫu hiện đang nằm trong tab `Wallpapers`).
 - Bước tiếp theo:
-  - Kiểm tra tương tác chọn ảnh từ thư viện trên máy thật và theo dõi quá trình sinh depth map cho ảnh tùy chỉnh.
+  - Nếu muốn giống app gốc hơn ở màn hình đầu, có thể hiển thị thêm 3 mục `Sample` (`alpine`, `anime_fighter`, `woman_selfie`) ở tab `Gallery` và kiểm tra `WALLPAPER-001` trên thiết bị thật.

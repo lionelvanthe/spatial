@@ -136,13 +136,18 @@ class VideoExporter {
                 }
             }
 
-            for (frame in 0 until totalFrames) {
-                coroutineContext.ensureActive()
-                renderer.draw(cfg, patternId, LoopPlan.phase(frame, framesPerLoop, patternId))
-                EGLExt.eglPresentationTimeANDROID(display, eglSurface, frame * 1_000_000_000L / LoopPlan.FPS)
-                EGL14.eglSwapBuffers(display, eglSurface)
-                drain(untilEnd = false)
-                onProgress((frame + 1f) / totalFrames)
+            try {
+                for (frame in 0 until totalFrames) {
+                    coroutineContext.ensureActive()
+                    val progress = (frame % framesPerLoop).toFloat() / framesPerLoop.toFloat()
+                    renderer.draw(cfg, patternId, progress)
+                    EGLExt.eglPresentationTimeANDROID(display, eglSurface, frame * 1_000_000_000L / LoopPlan.FPS)
+                    EGL14.eglSwapBuffers(display, eglSurface)
+                    drain(untilEnd = false)
+                    onProgress((frame + 1f) / totalFrames)
+                }
+            } finally {
+                renderer.release()
             }
             codec.signalEndOfInputStream()
             drain(untilEnd = true)
@@ -209,127 +214,137 @@ class VideoExporter {
         private val width: Int,
         private val height: Int
     ) {
-        private val program = ShaderHelper.createProgram(ParallaxShaders.VERTEX, ParallaxShaders.FRAGMENT)
-            .also { check(it != 0) { "Parallax shader failed to build" } }
-        private val textures = IntArray(4)
-        private val imageAspect = image.width.toFloat() / image.height
-        private val depthTexelX = 1f / depthWidth.coerceAtLeast(1)
-        private val depthTexelY = 1f / depthHeight.coerceAtLeast(1)
-        private val separated: Boolean
-        private val sample = FloatArray(3)
-        private val quad: ByteBuffer = ByteBuffer.allocateDirect(QUAD.size * 4).order(ByteOrder.nativeOrder()).also {
-            it.asFloatBuffer().put(QUAD)
-        }
+        private val modelBridge = SpatialModelBridge()
+        private val program = ShaderHelper.createProgram(MESH_VERT, MESH_FRAG)
+            .also { check(it != 0) { "Mesh shader failed to build" } }
+        private val textureIds = IntArray(1)
+        private val vboIds = IntArray(2)
+        private val projectionMatrix = FloatArray(16)
+        private val viewMatrix = FloatArray(16)
+        private val viewProjectionMatrix = FloatArray(16)
+        private val modelMatrix = FloatArray(16)
+
+        private val uViewProjectionMatrix = GLES20.glGetUniformLocation(program, "uViewProjectionMatrix")
+        private val uModelMatrix = GLES20.glGetUniformLocation(program, "uModelMatrix")
+        private val uSampler = GLES20.glGetUniformLocation(program, "uSampler")
+        private val aPosition = GLES20.glGetAttribLocation(program, "aPosition")
+        private val aTextureST = GLES20.glGetAttribLocation(program, "aTextureST")
 
         init {
-            GLES20.glGenTextures(textures.size, textures, 0)
-            val layers = buildLayers(image, depth, depthWidth, depthHeight)
-            separated = layers != null
-            val depthBitmap = depthBitmap(depth, depthWidth, depthHeight, layers?.depthTexture)
-            val inpaint = layers?.let { Bitmap.createBitmap(it.layers[0], image.width, image.height, Bitmap.Config.ARGB_8888) } ?: image
-            val mask = layers?.let { Bitmap.createBitmap(it.layers[1], image.width, image.height, Bitmap.Config.ARGB_8888) }
-                ?: opaqueMask(image.width, image.height)
-            upload(0, image)
-            upload(1, depthBitmap)
-            upload(2, inpaint)
-            upload(3, mask)
-            depthBitmap.recycle()
-            if (inpaint !== image) inpaint.recycle()
-            mask.recycle()
+            val imageAspect = image.width.toFloat() / image.height.coerceAtLeast(1)
+            val depthBytes = depth ?: ByteArray(16) { 128.toByte() }
+            val dw = if (depth != null) depthWidth.coerceAtLeast(1) else 4
+            val dh = if (depth != null) depthHeight.coerceAtLeast(1) else 4
+            modelBridge.initializeMesh(depthBytes, dw, dh, imageAspect, gridSize = 96)
+
+            GLES20.glGenTextures(1, textureIds, 0)
+            upload(image)
+
+            GLES20.glGenBuffers(2, vboIds, 0)
+            modelBridge.indexBuffer?.let { ib ->
+                ib.position(0)
+                GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboIds[1])
+                GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, modelBridge.indexCount * 2, ib, GLES20.GL_STATIC_DRAW)
+                GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
+            }
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboIds[0])
+            GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, modelBridge.vertexCount * 5 * 4, null, GLES20.GL_DYNAMIC_DRAW)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+
+            android.opengl.Matrix.setIdentityM(modelMatrix, 0)
+            android.opengl.Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, 2f, 0f, 0f, 0f, 0f, 1f, 0f)
+            val viewAspect = width.toFloat() / height.coerceAtLeast(1)
+            if (viewAspect >= imageAspect) {
+                android.opengl.Matrix.orthoM(projectionMatrix, 0, -viewAspect, viewAspect, -1f, 1f, 0.1f, 10f)
+            } else {
+                val halfH = imageAspect / viewAspect
+                android.opengl.Matrix.orthoM(projectionMatrix, 0, -imageAspect, imageAspect, -halfH, halfH, 0.1f, 10f)
+            }
+            android.opengl.Matrix.multiplyMM(viewProjectionMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
         }
 
-        fun draw(config: SpatialSceneConfig, patternId: String, cycle: Float) {
+        fun draw(config: SpatialSceneConfig, patternId: String, progress: Float) {
             GLES20.glViewport(0, 0, width, height)
             GLES20.glClearColor(0.06f, 0.06f, 0.09f, 1.0f)
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+
+            modelBridge.setProperties(
+                config.intensity,
+                config.depthCenter,
+                config.rInverted,
+                config.zoom,
+                config.zoom3D,
+                config.elasticity
+            )
+            modelBridge.updateAnimated(progress, MotionPattern.patternIdToNativeInt(patternId))
+
+            val vb = modelBridge.vertexBuffer ?: return
+            vb.position(0)
+
             GLES20.glUseProgram(program)
-            GLES20.glUniform1f(loc("uLayered"), if (separated) 1f else 0f)
+            GLES20.glUniformMatrix4fv(uViewProjectionMatrix, 1, false, viewProjectionMatrix, 0)
+            GLES20.glUniformMatrix4fv(uModelMatrix, 1, false, modelMatrix, 0)
 
-            val animIntensity = 0.65f * (0.4f + 0.7f * config.intensity)
-            MotionPattern.sample(patternId, cycle, animIntensity, sample)
-            val animationZoom = if (sample[2].isNaN()) 0f else sample[2]
-            val zoomScale = ViewerFraming.zoomScale(config.zoom, 2, animationZoom = animationZoom)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
+            GLES20.glUniform1i(uSampler, 0)
 
-            for (unit in 0 until 4) {
-                GLES20.glActiveTexture(GLES20.GL_TEXTURE0 + unit)
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[unit])
-            }
-            uniform1i("image", 0)
-            uniform1i("uDepthMap", 1)
-            GLES20.glUniform2f(loc("uDepthTexel"), depthTexelX, depthTexelY)
-            uniform1i("uInpaint", 2)
-            uniform1i("uForegroundMask", 3)
-            GLES20.glUniform2f(loc("uOffset"), sample[0].coerceIn(-1f, 1f), sample[1].coerceIn(-1f, 1f))
-            GLES20.glUniform1f(loc("uDepthHeight"), DepthProjection.depthHeight(config.intensity))
-            GLES20.glUniform1f(loc("uNeutral"), ViewerFraming.depthCenter(config.depthCenter))
-            GLES20.glUniform1f(loc("uAspectRatio"), width.toFloat() / height)
-            GLES20.glUniform1f(loc("uImageAspect"), imageAspect)
-            GLES20.glUniform4f(loc("uBgColor"), 0.06f, 0.06f, 0.09f, 1.0f)
-            GLES20.glUniform1f(loc("uScaleType"), 0f)
-            GLES20.glUniform1f(loc("uFill"), .88f)
-            GLES20.glUniform1f(loc("uZoom"), zoomScale)
-            GLES20.glUniform2f(loc("uPan"), 0f, 0f)
-            GLES20.glUniform1f(loc("uStrength"), 1.0f)
-            ParallaxShaders.applyEffects(program, config)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboIds[0])
+            GLES20.glBufferSubData(GLES20.GL_ARRAY_BUFFER, 0, modelBridge.vertexCount * 5 * 4, vb)
 
-            val pos = GLES20.glGetAttribLocation(program, "position")
-            val st = GLES20.glGetAttribLocation(program, "textureST")
-            quad.position(0)
-            GLES20.glVertexAttribPointer(pos, 2, GLES20.GL_FLOAT, false, 16, quad)
-            GLES20.glEnableVertexAttribArray(pos)
-            quad.position(8)
-            GLES20.glVertexAttribPointer(st, 2, GLES20.GL_FLOAT, false, 16, quad)
-            GLES20.glEnableVertexAttribArray(st)
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
-            GLES20.glDisableVertexAttribArray(pos)
-            GLES20.glDisableVertexAttribArray(st)
+            GLES20.glEnableVertexAttribArray(aPosition)
+            GLES20.glVertexAttribPointer(aPosition, 3, GLES20.GL_FLOAT, false, 20, 0)
+            GLES20.glEnableVertexAttribArray(aTextureST)
+            GLES20.glVertexAttribPointer(aTextureST, 2, GLES20.GL_FLOAT, false, 20, 12)
+
+            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, vboIds[1])
+            GLES20.glDrawElements(GLES20.GL_TRIANGLES, modelBridge.indexCount, GLES20.GL_UNSIGNED_SHORT, 0)
+
+            GLES20.glDisableVertexAttribArray(aPosition)
+            GLES20.glDisableVertexAttribArray(aTextureST)
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
+            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
         }
 
-        private fun loc(name: String) = GLES20.glGetUniformLocation(program, name)
-        private fun uniform1i(name: String, value: Int) = GLES20.glUniform1i(loc(name), value)
+        fun release() {
+            modelBridge.destroy()
+            GLES20.glDeleteBuffers(2, vboIds, 0)
+            GLES20.glDeleteTextures(1, textureIds, 0)
+            GLES20.glDeleteProgram(program)
+        }
 
-        private fun upload(index: Int, bitmap: Bitmap) {
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textures[index])
+        private fun upload(bitmap: Bitmap) {
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
             GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
         }
-
-        private fun buildLayers(image: Bitmap, depth: ByteArray?, dw: Int, dh: Int): LayerBuilder.LayerData? {
-            if (depth == null || depth.size != dw * dh) return null
-            val pixels = IntArray(image.width * image.height)
-            image.getPixels(pixels, 0, image.width, 0, 0, image.width, image.height)
-            return LayerBuilder.buildLayers(pixels, image.width, image.height, depth, dw, dh)
-        }
-
-        private fun depthBitmap(depth: ByteArray?, w: Int, h: Int, packed: IntArray?): Bitmap {
-            val sw = w.coerceAtLeast(1)
-            val sh = h.coerceAtLeast(1)
-            val pixels = packed ?: IntArray(sw * sh) {
-                val v = depth?.getOrNull(it)?.toInt()?.and(0xFF) ?: 0
-                0xFF000000.toInt() or (v shl 16) or (v shl 8) or v
-            }
-            return Bitmap.createBitmap(pixels, sw, sh, Bitmap.Config.ARGB_8888)
-        }
-
-        private fun opaqueMask(w: Int, h: Int) =
-            Bitmap.createBitmap(IntArray(w * h) { 0xFFFFFFFF.toInt() }, w, h, Bitmap.Config.ARGB_8888)
     }
 
     private companion object {
         const val EGL_RECORDABLE_ANDROID = 0x3142
         const val MAX_SIDE = 1080
         const val MAX_IDLE_ROUNDS = 500
-        // Exact center crop; the shader bounds the ray instead of relying on hidden overscan.
-        const val FILL = 1.0f
-        // x, y, u, v; v = 0 is the top edge, as in the live mesh.
-        val QUAD = floatArrayOf(
-            -1f, 1f, 0f, 0f,
-            1f, 1f, 1f, 0f,
-            -1f, -1f, 0f, 1f,
-            1f, -1f, 1f, 1f
-        )
+        const val MESH_VERT = """
+            uniform mat4 uViewProjectionMatrix;
+            uniform mat4 uModelMatrix;
+            attribute vec3 aPosition;
+            attribute vec2 aTextureST;
+            varying vec2 vTextureCoords;
+            void main() {
+                gl_Position = uViewProjectionMatrix * (uModelMatrix * vec4(aPosition, 1.0));
+                vTextureCoords = aTextureST;
+            }
+        """
+        const val MESH_FRAG = """
+            precision highp float;
+            uniform sampler2D uSampler;
+            varying vec2 vTextureCoords;
+            void main() {
+                gl_FragColor = texture2D(uSampler, vTextureCoords);
+            }
+        """
     }
 }

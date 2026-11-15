@@ -73,28 +73,24 @@ class ZoomControlsTest {
             compose.waitForIdle()
         }
 
-        // Tab 0 (Shake): Zoom & Look exist, Elasticity does not
+        // Tab 0 (Rotate): Zoom exists, Elasticity does not
         compose.onNodeWithTag("viewer_zoom", useUnmergedTree = true).fetchSemanticsNode()
-        compose.onNodeWithText("Isometric:", useUnmergedTree = true).fetchSemanticsNode()
         compose.onNodeWithTag("viewer_elasticity", useUnmergedTree = true).assertDoesNotExist()
 
-        // Switch to Tab 1 (Rotate in bottom bar / 2nd tab):
-        compose.onNodeWithContentDescription("Rotate").performClick()
+        // Switch to Tab 1 (Shake):
+        compose.onNodeWithContentDescription("Shake").performClick()
         compose.onNodeWithTag("viewer_zoom", useUnmergedTree = true).fetchSemanticsNode()
         compose.onNodeWithTag("viewer_elasticity", useUnmergedTree = true).fetchSemanticsNode()
         compose.onNodeWithText("Độ đàn hồi:", useUnmergedTree = true).fetchSemanticsNode()
-        compose.onNodeWithText("Isometric:", useUnmergedTree = true).fetchSemanticsNode()
-        compose.onNodeWithText("Dolly:", useUnmergedTree = true).fetchSemanticsNode()
 
         drag("viewer_elasticity", false)
         compose.runOnIdle { assertEquals(MotionLimits.MIN_ELASTICITY, viewModel.currentConfig.value.elasticity, .001f) }
         drag("viewer_elasticity", true)
         compose.runOnIdle { assertEquals(MotionLimits.MAX_ELASTICITY, viewModel.currentConfig.value.elasticity, .001f) }
 
-        // Switch to Tab 2 (Animations): Zoom & Look exist, Elasticity does not
+        // Switch to Tab 2 (Animations): Zoom exists, Elasticity does not
         compose.onNodeWithContentDescription("Animations").performClick()
         compose.onNodeWithTag("viewer_zoom", useUnmergedTree = true).fetchSemanticsNode()
-        compose.onNodeWithText("Isometric:", useUnmergedTree = true).fetchSemanticsNode()
         compose.onNodeWithTag("viewer_elasticity", useUnmergedTree = true).assertDoesNotExist()
     }
 }
