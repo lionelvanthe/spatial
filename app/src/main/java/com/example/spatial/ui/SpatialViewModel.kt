@@ -267,8 +267,8 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                     customImageUri = uri.toString(),
                     config = SpatialSceneConfig(
                         intensity = MotionLimits.DEFAULT_INTENSITY,
-                        depthCenter = 0.5f,
-                        speed = 0.35f,
+                        depthCenter = 0.65f,
+                        speed = 0.65f,
                         zoom = 0.0f,
                         zoom3D = 0.0f,
                         patternId = "none"

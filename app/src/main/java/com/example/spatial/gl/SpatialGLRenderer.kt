@@ -15,6 +15,7 @@ import javax.microedition.khronos.opengles.GL10
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.hypot
+import kotlin.math.sqrt
 
 /**
  * OpenGL ES 2.0 Renderer powered by the native C++ Adaptive 3D Triangle Mesh
@@ -161,8 +162,8 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             touchPanX = (touchPanX + dx * 2.0f).coerceIn(-1.0f, 1.0f)
             touchPanY = (touchPanY - dy * 2.0f).coerceIn(-1.0f, 1.0f)
         } else {
-            touchDragX = (touchDragX + dx * 1.6f).coerceIn(-1.0f, 1.0f)
-            touchDragY = (touchDragY - dy * 1.6f).coerceIn(-1.0f, 1.0f)
+            touchDragX = (touchDragX + dx * 2.2f).coerceIn(-1.0f, 1.0f)
+            touchDragY = (touchDragY - dy * 2.2f).coerceIn(-1.0f, 1.0f)
         }
     }
 
@@ -191,7 +192,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
         GLES20.glClearColor(0.06f, 0.06f, 0.09f, 1.0f)
-        GLES20.glDisable(GLES20.GL_DEPTH_TEST)
+        GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDisable(GLES20.GL_CULL_FACE)
 
         val vertSrc = ShaderHelper.loadShaderFromAssets(context, "shaders/mesh_default.vert")
@@ -213,7 +214,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         hasMeshBuffers = vboIds[0] != 0 && vboIds[1] != 0
 
         Matrix.setIdentityM(modelMatrix, 0)
-        Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, 2.0f, 0f, 0f, 0f, 0f, 1f, 0f)
+        Matrix.setIdentityM(viewMatrix, 0)
 
         lastFrameTimeMs = SystemClock.uptimeMillis()
         animStartTimeMs = lastFrameTimeMs
@@ -233,18 +234,17 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private fun updateProjectionMatrix() {
         val viewAspect = viewportWidth.toFloat() / viewportHeight.toFloat()
-        val imageAspect = activeBitmapWidth.toFloat() / activeBitmapHeight.toFloat()
-        if (viewAspect >= imageAspect) {
-            Matrix.orthoM(projectionMatrix, 0, -viewAspect, viewAspect, -1f, 1f, 0.1f, 10f)
+        if (viewAspect <= 1.0f) {
+            Matrix.frustumM(projectionMatrix, 0, -viewAspect, viewAspect, -1f, 1f, 2.0f, 12.0f)
         } else {
-            val halfH = imageAspect / viewAspect
-            Matrix.orthoM(projectionMatrix, 0, -imageAspect, imageAspect, -halfH, halfH, 0.1f, 10f)
+            val invAspect = 1f / viewAspect
+            Matrix.frustumM(projectionMatrix, 0, -1f, 1f, -invAspect, invAspect, 2.0f, 12.0f)
         }
         Matrix.multiplyMM(viewProjectionMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
     }
 
     override fun onDrawFrame(gl: GL10?) {
-        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+        GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         if (programHandle == 0) return
 
         val nowMs = SystemClock.uptimeMillis()
@@ -295,7 +295,16 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             elasticity = cfg.elasticity
         )
 
+        val viewAspect = viewportWidth.toFloat() / viewportHeight.toFloat()
+        val imageAspect = activeBitmapWidth.toFloat() / activeBitmapHeight.toFloat()
+        val fitScale = if (viewAspect <= 1.0f) {
+            if (imageAspect > viewAspect) (viewAspect * 3.5f) / imageAspect else 3.5f
+        } else {
+            if (imageAspect > viewAspect) 3.5f / imageAspect else 3.5f / viewAspect
+        }
         Matrix.setIdentityM(modelMatrix, 0)
+        Matrix.translateM(modelMatrix, 0, 0f, 0f, -7.0f)
+        Matrix.scaleM(modelMatrix, 0, fitScale, fitScale, fitScale)
         when (tabMode) {
             0 -> modelBridge.updateRotate(smoothTiltX, smoothTiltY)
             1 -> {
@@ -331,29 +340,35 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private fun updateTiltState(dt: Float, tabMode: Int) {
         val gx = gyroX
         val gy = gyroY
-
-        // Adaptive auto-centering toward resting posture
-        val gyroSpeed = hypot(gx - prevGyroX, gy - prevGyroY) / dt.coerceAtLeast(0.001f)
-        val restingBoost = if (gyroSpeed < 0.15f) 1.65f else 1.0f
-        val offsetDist = hypot(gx - gyroNeutralX, gy - gyroNeutralY)
-        val edgeBoost = 1.0f + offsetDist * 1.2f
-        val alpha = (1.95f * restingBoost * edgeBoost * dt).coerceAtMost(0.22f)
-        gyroNeutralX += (gx - gyroNeutralX) * alpha
-        gyroNeutralY += (gy - gyroNeutralY) * alpha
-
-        if (tabMode == 1) {
-            val dgx = (gx - prevGyroX) / dt.coerceAtLeast(0.001f)
-            val dgy = (gy - prevGyroY) / dt.coerceAtLeast(0.001f)
-            if (hypot(dgx, dgy) > 1.2f) {
-                pendingImpulseX += dgx * 0.04f
-                pendingImpulseY += dgy * 0.04f
-            }
-        }
+        val safeDt = dt.coerceAtLeast(0.001f)
+        val gyroVx = (gx - prevGyroX) / safeDt
+        val gyroVy = (gy - prevGyroY) / safeDt
         prevGyroX = gx
         prevGyroY = gy
 
-        val rawX = softCompress((gx - gyroNeutralX) * 1.35f + touchDragX)
-        val rawY = softCompress((gy - gyroNeutralY) * 1.35f + touchDragY)
+        // Responsive auto-centering from e67e38f:
+        // Slows neutral drift while actively tilting, swiftly recovers within ~0.55s - 0.60s when resting.
+        val motionSpeed = hypot(gyroVx, gyroVy)
+        val offsetDistance = hypot(gx - gyroNeutralX, gy - gyroNeutralY)
+        val restingBoost = if (motionSpeed < 0.32f) {
+            1.65f
+        } else {
+            (1.0f / (1.0f + motionSpeed * 1.5f)).coerceIn(0.4f, 1.0f)
+        }
+        val edgeBoost = 1.0f + offsetDistance * 1.4f
+        val recenterAlpha = (1.95f * restingBoost * edgeBoost * dt).coerceIn(0.0f, 0.22f)
+        gyroNeutralX += (gx - gyroNeutralX) * recenterAlpha
+        gyroNeutralY += (gy - gyroNeutralY) * recenterAlpha
+
+        if (tabMode == 1 && motionSpeed > 1.2f) {
+            pendingImpulseX += gyroVx * 0.04f
+            pendingImpulseY += gyroVy * 0.04f
+        }
+
+        val sensorTiltX = softCompress((gx - gyroNeutralX) * 1.35f)
+        val sensorTiltY = softCompress((gy - gyroNeutralY) * 1.35f)
+        val rawX = if (isTouching) touchDragX else (sensorTiltX + touchDragX).coerceIn(-1.0f, 1.0f)
+        val rawY = if (isTouching) touchDragY else (sensorTiltY + touchDragY).coerceIn(-1.0f, 1.0f)
 
         if (!isTouching && (abs(touchDragX) > 0.0001f || abs(touchDragY) > 0.0001f)) {
             val decay = exp(-3.5f * dt)
@@ -366,7 +381,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         smoothTiltY += (rawY - smoothTiltY) * lerp
     }
 
-    private fun softCompress(v: Float): Float = v / (1.0f + 0.35f * abs(v))
+    private fun softCompress(value: Float): Float {
+        val clamped = value.coerceIn(-3.0f, 3.0f)
+        return (clamped / sqrt(1.0f + 0.35f * clamped * clamped)).coerceIn(-1.0f, 1.0f)
+    }
 
     private fun uploadTexture(bitmap: Bitmap) {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])

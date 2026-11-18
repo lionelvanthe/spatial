@@ -7,9 +7,14 @@ namespace spatial {
 
 namespace {
 
-inline float computeDepthScale(float intensity) {
-    float clamped = std::clamp(intensity, 0.0f, 1.25f);
-    return 0.55f + 0.55f * clamped;
+inline float computeInternalIntensity(float uiIntensity) {
+    float clamped = std::clamp(uiIntensity, 0.0f, 1.25f);
+    return 0.40f + 0.70f * clamped;
+}
+
+inline float computeDepthScale(float uiIntensity) {
+    float internal = computeInternalIntensity(uiIntensity);
+    return 0.30f + 0.70f * internal * internal * internal;
 }
 
 } // namespace
@@ -120,12 +125,10 @@ void SpatialModelEngine::writeParallaxVertices(
     updateCurvedDepths();
 
     const float effZoom = (zoomOverride < 0.0f) ? (zoomOverride * 0.5f) : zoomOverride;
-    const float baseScale = 1.0f + effZoom * 0.45f;
     const float z3dActive = (std::fabs(zoomOverride) >= 0.1f) ? zoom3D_ : 0.0f;
-    // Soft-capped amplitude by intensity so high intensity increases parallax without warping
-    const float normInt = std::clamp(intensity_ / 1.25f, 0.0f, 1.0f);
-    const float ampFactor = 0.18f + 0.82f * std::sqrt(normInt);
-    const float maxShift = 0.042f * ampFactor;
+    // Exact ImageDynamicModel::updateProperties + applyVerticesShift scaled from height ~0.95 to 2.0
+    const float internalIntensity = computeInternalIntensity(intensity_);
+    const float maxShift = 0.084f * internalIntensity;
 
     const size_t n = mesh_.vertices.size();
     for (size_t i = 0; i < n; ++i) {
@@ -134,15 +137,13 @@ void SpatialModelEngine::writeParallaxVertices(
         const float s0 = cd - effectiveDepthCenter;
 
         // Parallax shift (edges stay anchored with edgeWeight == 0)
-        float px = mv.baseX + shiftX * s0 * maxShift * mv.edgeWeight;
-        float py = mv.baseY + shiftY * s0 * maxShift * mv.edgeWeight;
+        float px = mv.baseX + shiftX * s0 * maxShift * mv.edgeWeight + panX;
+        float py = mv.baseY + shiftY * s0 * maxShift * mv.edgeWeight + panY;
 
-        // Continuous zoom + optional 3D depth zoom
-        float zZoomScale = baseScale + effZoom * z3dActive * s0 * 0.35f * mv.edgeWeight;
-        px = px * zZoomScale + panX;
-        py = py * zZoomScale + panY;
-
-        float pz = cd * 0.023f;
+        // Perspective Z-zoom matching ImageDynamicModel::applyVerticesShift
+        float zFactor = (effZoom >= 0.0f) ? cd : (1.0f - cd);
+        float zWeight = (1.0f - z3dActive) + z3dActive * zFactor;
+        float pz = cd * 0.048f + effZoom * 0.55f * zWeight;
 
         const size_t baseIdx = i * 5;
         outVertices[baseIdx + 0] = px;
@@ -201,7 +202,7 @@ void SpatialModelEngine::updateShake(float* outVertices, float dt, float tiltX, 
     int subSteps = std::clamp(static_cast<int>(std::ceil(clampedDt / 0.008f)), 1, 4);
     float subDt = clampedDt / static_cast<float>(subSteps);
 
-    const float maxShift = 0.036f * depthScale_;
+    const float maxShift = 0.084f * computeInternalIntensity(intensity_);
     const float sx = std::clamp(tiltX, -1.0f, 1.0f);
     const float sy = std::clamp(tiltY, -1.0f, 1.0f);
 
@@ -282,19 +283,18 @@ void SpatialModelEngine::updateShake(float* outVertices, float dt, float tiltX, 
     }
 
     const float effZoom = (zoom_ < 0.0f) ? (zoom_ * 0.5f) : zoom_;
-    const float baseScale = 1.0f + effZoom * 0.45f;
     const float z3dActive = (std::fabs(zoom_) >= 0.1f) ? zoom3D_ : 0.0f;
 
     for (size_t i = 0; i < n; ++i) {
         const MeshVertex& mv = mesh_.vertices[i];
         const float cd = nodes_[i].curvedDepth;
-        const float s0 = cd - depthCenter_;
-        float zZoomScale = baseScale + effZoom * z3dActive * s0 * 0.35f * mv.edgeWeight;
+        float zFactor = (effZoom >= 0.0f) ? cd : (1.0f - cd);
+        float zWeight = (1.0f - z3dActive) + z3dActive * zFactor;
 
         const size_t baseIdx = i * 5;
-        outVertices[baseIdx + 0] = nodes_[i].posX * zZoomScale;
-        outVertices[baseIdx + 1] = nodes_[i].posY * zZoomScale;
-        outVertices[baseIdx + 2] = cd * 0.023f * depthScale_;
+        outVertices[baseIdx + 0] = nodes_[i].posX;
+        outVertices[baseIdx + 1] = nodes_[i].posY;
+        outVertices[baseIdx + 2] = cd * 0.048f + effZoom * 0.55f * zWeight;
         outVertices[baseIdx + 3] = mv.u;
         outVertices[baseIdx + 4] = mv.v;
     }

@@ -7,33 +7,6 @@ namespace spatial {
 
 namespace {
 
-inline float sampleBilinear(
-    const uint8_t* bytes,
-    int w,
-    int h,
-    float u,
-    float v
-) {
-    if (!bytes || w <= 0 || h <= 0) return 0.5f;
-    float x = std::clamp(u, 0.0f, 1.0f) * static_cast<float>(w - 1);
-    float y = std::clamp(v, 0.0f, 1.0f) * static_cast<float>(h - 1);
-    int x0 = static_cast<int>(x);
-    int y0 = static_cast<int>(y);
-    int x1 = std::min(x0 + 1, w - 1);
-    int y1 = std::min(y0 + 1, h - 1);
-    float fx = x - static_cast<float>(x0);
-    float fy = y - static_cast<float>(y0);
-
-    float d00 = static_cast<float>(bytes[y0 * w + x0]) / 255.0f;
-    float d10 = static_cast<float>(bytes[y0 * w + x1]) / 255.0f;
-    float d01 = static_cast<float>(bytes[y1 * w + x0]) / 255.0f;
-    float d11 = static_cast<float>(bytes[y1 * w + x1]) / 255.0f;
-
-    float d0 = d00 + (d10 - d00) * fx;
-    float d1 = d01 + (d11 - d01) * fx;
-    return d0 + (d1 - d0) * fy;
-}
-
 inline void addTri(std::vector<uint32_t>& out, uint32_t a, uint32_t b, uint32_t c) {
     out.push_back(a);
     out.push_back(b);
@@ -124,70 +97,48 @@ AdaptiveMeshData AdaptiveMeshBuilder::build(
     const int stride = gridSize + 1;
     const int totalGridVerts = stride * stride;
 
-    // 1. Sample depth at full grid resolution
-    std::vector<float> gridDepth(totalGridVerts, 0.5f);
-    for (int gy = 0; gy <= gridSize; ++gy) {
-        float v = static_cast<float>(gy) / static_cast<float>(gridSize);
-        for (int gx = 0; gx <= gridSize; ++gx) {
-            float u = static_cast<float>(gx) / static_cast<float>(gridSize);
-            gridDepth[gy * stride + gx] = sampleBilinear(depthBytes, depthWidth, depthHeight, u, v);
-        }
-    }
+    // 1. Sample depth at full grid resolution matching PreInitializationModelData::calculateDepthValue
+    // Window half-size from initializeVertices (0x21980): 0.0185 * 0.5 = 0.00925 of image size
+    std::vector<float> smoothDepth(totalGridVerts, 0.5f);
+    if (depthBytes && depthWidth > 0 && depthHeight > 0) {
+        const float cellW = static_cast<float>(depthWidth - 1) / static_cast<float>(gridSize);
+        const float cellH = static_cast<float>(depthHeight - 1) / static_cast<float>(gridSize);
+        const float halfWinX = std::max(1.0f, 0.00925f * static_cast<float>(depthWidth));
+        const float halfWinY = std::max(1.0f, 0.00925f * static_cast<float>(depthHeight));
 
-    // Edge-preserving bilateral filter: smooths internal facial/body depth variations
-    // so foreground objects move as a rigid volume, while preserving sharp silhouette separation.
-    std::vector<float> smoothDepth = gridDepth;
-    std::vector<float> tempDepth(totalGridVerts);
-    constexpr int BILATERAL_RADIUS = 3;
-    constexpr float INV_TWO_SIGMA_S2 = 1.0f / (2.0f * 2.5f * 2.5f);
-    constexpr float INV_TWO_SIGMA_R2 = 1.0f / (2.0f * 0.12f * 0.12f);
-
-    for (int pass = 0; pass < 2; ++pass) {
         for (int gy = 0; gy <= gridSize; ++gy) {
+            float cy = static_cast<float>(gy) * cellH;
+            int y0 = std::clamp(static_cast<int>(std::lround(cy - halfWinY)), 0, depthHeight - 1);
+            int y1 = std::clamp(static_cast<int>(std::lround(cy + halfWinY)), 0, depthHeight - 1);
+            if (y1 < y0) y1 = y0;
+            int ciy = std::clamp(static_cast<int>(std::lround(cy)), 0, depthHeight - 1);
+
             for (int gx = 0; gx <= gridSize; ++gx) {
-                float centerD = smoothDepth[gy * stride + gx];
-                float wSum = 0.0f;
-                float dSum = 0.0f;
-                for (int dy = -BILATERAL_RADIUS; dy <= BILATERAL_RADIUS; ++dy) {
-                    int ny = std::clamp(gy + dy, 0, gridSize);
-                    for (int dx = -BILATERAL_RADIUS; dx <= BILATERAL_RADIUS; ++dx) {
-                        int nx = std::clamp(gx + dx, 0, gridSize);
-                        float nd = smoothDepth[ny * stride + nx];
-                        float dist2 = static_cast<float>(dx * dx + dy * dy);
-                        float range2 = (nd - centerD) * (nd - centerD);
-                        float w = std::exp(-dist2 * INV_TWO_SIGMA_S2 - range2 * INV_TWO_SIGMA_R2);
-                        wSum += w;
-                        dSum += nd * w;
+                float cx = static_cast<float>(gx) * cellW;
+                int x0 = std::clamp(static_cast<int>(std::lround(cx - halfWinX)), 0, depthWidth - 1);
+                int x1 = std::clamp(static_cast<int>(std::lround(cx + halfWinX)), 0, depthWidth - 1);
+                if (x1 < x0) x1 = x0;
+                int cix = std::clamp(static_cast<int>(std::lround(cx)), 0, depthWidth - 1);
+
+                float sum = 0.0f;
+                float maxVal = 0.0f;
+                int count = 0;
+                for (int py = y0; py <= y1; ++py) {
+                    const uint8_t* row = depthBytes + py * depthWidth;
+                    for (int px = x0; px <= x1; ++px) {
+                        float d = static_cast<float>(row[px]) / 255.0f;
+                        sum += d;
+                        if (d > maxVal) maxVal = d;
+                        ++count;
                     }
                 }
-                tempDepth[gy * stride + gx] = (wSum > 1e-6f) ? (dSum / wSum) : centerD;
-            }
-        }
-        smoothDepth.swap(tempDepth);
-    }
-
-    // Light single-pass gradient guard at extreme cliffs to avoid tearing
-    constexpr float MAX_DEPTH_GRAD = 0.065f;
-    tempDepth = smoothDepth;
-    for (int gy = 1; gy < gridSize; ++gy) {
-        for (int gx = 1; gx < gridSize; ++gx) {
-            int idx = gy * stride + gx;
-            float c = smoothDepth[idx];
-            float avg = 0.25f * (
-                smoothDepth[idx - 1] +
-                smoothDepth[idx + 1] +
-                smoothDepth[idx - stride] +
-                smoothDepth[idx + stride]
-            );
-            float diff = avg - c;
-            if (std::fabs(diff) > MAX_DEPTH_GRAD) {
-                tempDepth[idx] = c + diff * 0.45f;
-            } else {
-                tempDepth[idx] = c;
+                float avg = (count > 0) ? (sum / static_cast<float>(count)) : 0.5f;
+                float center = static_cast<float>(depthBytes[ciy * depthWidth + cix]) / 255.0f;
+                float val = (avg < center) ? (0.4f * avg + 0.6f * maxVal) : (0.7f * avg + 0.3f * maxVal);
+                smoothDepth[gy * stride + gx] = std::clamp(val, 0.0f, 1.0f);
             }
         }
     }
-    smoothDepth.swap(tempDepth);
 
     // 2. Compute block subdivision level on 4x4 coarse blocks (1 = fine 1x1, 2 = medium 2x2, 4 = coarse 4x4)
     const int coarseW = gridSize / 4;
@@ -317,8 +268,7 @@ AdaptiveMeshData AdaptiveMeshBuilder::build(
             float v = static_cast<float>(gy) / static_cast<float>(gridSize);
 
             bool isBorder = (gx == 0 || gx == gridSize || gy == 0 || gy == gridSize);
-            float distEdge = std::min(std::min(u, 1.0f - u), std::min(v, 1.0f - v));
-            float edgeWeight = isBorder ? 0.0f : std::clamp(distEdge / 0.025f, 0.0f, 1.0f);
+            float edgeWeight = isBorder ? 0.0f : 1.0f;
 
             MeshVertex mv;
             mv.baseX = (u * 2.0f - 1.0f) * halfW;

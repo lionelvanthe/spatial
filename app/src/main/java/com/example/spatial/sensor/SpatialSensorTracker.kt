@@ -5,23 +5,30 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
+import android.view.Surface
+import android.view.WindowManager
 import kotlin.math.atan2
 import kotlin.math.sqrt
 
 /**
- * Sensor tracker for device tilt (pitch & roll) using Sensor Fusion.
+ * Sensor tracker for device tilt using Game Rotation Vector (no magnetometer drift),
+ * falling back to Rotation Vector or Accelerometer, matching reference APK (`Lqc1`, `Lrc1`, `Lpc1`).
  */
 class SpatialSensorTracker(
-    context: Context,
+    private val context: Context,
     private val onSensorUpdate: (tiltX: Float, tiltY: Float) -> Unit
 ) : SensorEventListener {
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+    private val gameRotationSensor: Sensor? = sensorManager?.getDefaultSensor(Sensor.TYPE_GAME_ROTATION_VECTOR)
     private val rotationSensor: Sensor? = sensorManager?.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
     private val accelSensor: Sensor? = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
     private val rotationMatrix = FloatArray(9)
+    private val remappedMatrix = FloatArray(9)
     private val relativeTilt = RelativeTilt()
+    private var lastTimestampNs: Long = 0L
 
     private var initialPitch = 0.0f
     private var initialRoll = 0.0f
@@ -32,8 +39,9 @@ class SpatialSensorTracker(
     fun start() {
         if (sensorManager == null) return
         resetCalibration()
-        if (rotationSensor != null) {
-            sensorManager.registerListener(this, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
+        val primaryRotation = gameRotationSensor ?: rotationSensor
+        if (primaryRotation != null) {
+            sensorManager.registerListener(this, primaryRotation, SensorManager.SENSOR_DELAY_GAME)
         } else if (accelSensor != null) {
             sensorManager.registerListener(this, accelSensor, SensorManager.SENSOR_DELAY_GAME)
         }
@@ -45,6 +53,7 @@ class SpatialSensorTracker(
 
     fun resetCalibration() {
         isCalibrated = false
+        lastTimestampNs = 0L
         relativeTilt.reset()
     }
 
@@ -54,9 +63,12 @@ class SpatialSensorTracker(
         var pitch = 0.0f
         var roll = 0.0f
 
-        if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+        if (event.sensor.type == Sensor.TYPE_GAME_ROTATION_VECTOR ||
+            event.sensor.type == Sensor.TYPE_ROTATION_VECTOR
+        ) {
             SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
-            val (tiltX, tiltY) = relativeTilt.update(rotationMatrix)
+            val matrix = remapForDisplay(rotationMatrix)
+            val (tiltX, tiltY) = relativeTilt.update(matrix)
             onSensorUpdate(tiltX, tiltY)
             return
         } else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
@@ -83,6 +95,54 @@ class SpatialSensorTracker(
         val normTiltY = (-deltaPitch / maxRad).coerceIn(-1.0f, 1.0f)
 
         onSensorUpdate(normTiltX, normTiltY)
+    }
+
+    private fun remapForDisplay(src: FloatArray): FloatArray {
+        val rotation = currentDisplayRotation()
+        return when (rotation) {
+            Surface.ROTATION_90 -> {
+                SensorManager.remapCoordinateSystem(
+                    src,
+                    SensorManager.AXIS_Y,
+                    SensorManager.AXIS_MINUS_X,
+                    remappedMatrix
+                )
+                remappedMatrix
+            }
+            Surface.ROTATION_180 -> {
+                SensorManager.remapCoordinateSystem(
+                    src,
+                    SensorManager.AXIS_MINUS_X,
+                    SensorManager.AXIS_MINUS_Y,
+                    remappedMatrix
+                )
+                remappedMatrix
+            }
+            Surface.ROTATION_270 -> {
+                SensorManager.remapCoordinateSystem(
+                    src,
+                    SensorManager.AXIS_MINUS_Y,
+                    SensorManager.AXIS_X,
+                    remappedMatrix
+                )
+                remappedMatrix
+            }
+            else -> src
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentDisplayRotation(): Int {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                context.display?.rotation ?: Surface.ROTATION_0
+            } else {
+                val wm = context.getSystemService(Context.WINDOW_SERVICE) as? WindowManager
+                wm?.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            }
+        } catch (_: Exception) {
+            Surface.ROTATION_0
+        }
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

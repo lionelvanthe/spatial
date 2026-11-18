@@ -13,13 +13,17 @@
     - Unit tests: `MotionLimitsTest.kt`, `SpatialProjectionTest.kt`.
     - Android instrumentation tests: Thêm `AdaptiveMeshRendererTest.kt` (kiểm tra adaptive vertex reduction, spring impulse physics, và render không lộ viền đen khi nghiêng mạnh), cập nhật `ViewerViewportLayoutTest.kt`, `ZoomControlsTest.kt`, `ZoomExportTest.kt` (dùng `size = 256` tương thích hardware H.264 encoder).
 - Kết quả kiểm tra:
-  - `./scripts/harness.ps1 -Mode Verify`: PASS (`D:\android\spatial\.harness\runs\20261115T094611273Z-21a37cc8/result.json`).
-  - `./scripts/harness.ps1 -Mode Device` trên `JSN-L22 - 10`: PASS (`D:\android\spatial\.harness\runs\20261115T094734965Z-bd701d6a/result.json`).
-  - Sửa triệt để lỗi phình/méo vật thể ở Cường độ cao bằng **Edge-Preserving Bilateral Filter + `orthoM`**:
-    - `AdaptiveMeshBuilder.cpp`: Thay box-blur cũ bằng 2 pass **Bilateral Filter** (`radius=3`, `sigmaS=2.5`, `sigmaR=0.12`) để san đều độ sâu nội bộ khuôn mặt/chủ thể (di chuyển như khối cứng) nhưng giữ nguyên vách tách lớp sắc nét giữa chủ thể và nền, kèm 1 pass kẹp gradient nhẹ (`MAX_DEPTH_GRAD = 0.065f`) và ghim biên `edgeWeight` (`0.025f`).
-    - `SpatialModelEngine.cpp`: Trả `pz = cd * 0.023f` (khớp `libPhotos3DModelManager.so` gốc) để không gây biến dạng mắt cá khi đứng yên, giữ `computeDepthScale = 0.55f + 0.55f * clamped` và soft-cap `maxShift <= 0.042f`.
-    - `SpatialGLRenderer.kt`: Trả `updateProjectionMatrix()` về `Matrix.orthoM`, tắt `GL_DEPTH_TEST`, bỏ `scaleM` và `rotateM` tấm ảnh.
-  - Kiểm tra trực quan trên `JSN-L22`: Đã kiểm tra ảnh ở trạng thái tĩnh Cường độ min (`pup_min.png`) vs Cường độ max (`pup_max.png`) và khi vuốt ngang (`pup_max_swipe.png`) — ảnh ở Cường độ min và max giống hệt nhau khi đứng yên (không phình méo), và khi vuốt vẫn tách khối rõ rệt, kín 4 viền.
+  - `./scripts/harness.ps1 -Mode Verify`: PASS (`D:\android\spatial\.harness\runs\20261118T150342579Z-fc517c25/result.json`).
+  - `./scripts/harness.ps1 -Mode Device`: FAILED (không có thiết bị ADB kết nối — `D:\android\spatial\.harness\runs\20261118T150446312Z-fe0e8191/result.json`).
+  - Khôi phục cơ chế hồi tâm động theo commit `e67e38f` (trước `9b27320`):
+    - `SpatialSensorTracker.kt`: dùng `relativeTilt.update(matrix)` (bỏ SLERP bên trong `RelativeTilt`), giữ ưu tiên `TYPE_GAME_ROTATION_VECTOR` và `remapForDisplay`.
+    - `SpatialGLRenderer.kt`: khôi phục `updateTiltState` với `restingBoost` (`1.65f` khi nghỉ, giảm xuống `0.4f` khi đang nghiêng nhanh), `edgeBoost = 1.0f + offsetDistance * 1.4f`, `recenterRate = 1.95f * restingBoost * edgeBoost`, và `softCompress(c) = c / sqrt(1 + 0.35 * c^2)` với hệ số `* 1.35f`.
+  - Khắc phục tình trạng rích rắc (zigzag) ở mép giao nhau giữa vật thể gần-xa:
+    - `AdaptiveMeshBuilder.cpp`: bổ sung Depth-Aware Diagonal Split trong `tessellateSquareWithMidpoints` (`|d[tl]-d[br]| <= |d[tr]-d[bl]|` thì nối `tl-br`, ngược lại nối `tr-bl`), giúp cạnh tam giác bám dọc theo mép chéo thay vì cắt ngang gây răng cưa.
+  - Đồng bộ xử lý cảm biến khi nghiêng máy theo APK mẫu (`Lqc1`, `Lrc1`, `Lpc1`):
+    - `SpatialSensorTracker.kt`: ưu tiên `Sensor.TYPE_GAME_ROTATION_VECTOR` (tránh trôi/nhiễu từ kế của `TYPE_ROTATION_VECTOR`), fallback `TYPE_ROTATION_VECTOR` -> `TYPE_ACCELEROMETER`, và remap hệ tọa độ theo display rotation.
+    - `RelativeTilt.kt`: thêm `updateWithAutoCenter(matrix, dtMs)` tính trực tiếp 2 thành phần nghiêng mặt phẳng màn hình (không cộng gộp yaw + roll và không chia `0.55f`), lọc mượt theo `dtMs` (`alpha = lerp(0.30, 0.90)` sau giai đoạn ổn định đầu), và kéo ma trận tham chiếu về vị trí nghỉ bằng Quaternion SLERP (`t = dtMs * 0.0028f`).
+    - `SpatialGLRenderer.kt`: bỏ auto-centering trùng lặp (`gyroNeutralX/Y`) và `softCompress((gx - gyroNeutralX) * 1.35f)` trong `updateTiltState`.
 - Chưa xác minh / Lưu ý:
   - Chưa kiểm tra trực quan Live Wallpaper trên màn hình chính (`WALLPAPER-001`) và cảm biến nghiêng vật lý bằng tay trên thiết bị thật.
   - Tab `Gallery` mặc định chưa hiển thị 3 scene `Sample` (các scene mẫu hiện đang nằm trong tab `Wallpapers`).
