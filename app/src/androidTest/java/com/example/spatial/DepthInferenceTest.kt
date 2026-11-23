@@ -28,7 +28,9 @@ class DepthInferenceTest {
             val inputInfo = session.inputInfo.values.single().info as TensorInfo
             val outputInfo = session.outputInfo.values.single().info as TensorInfo
             assertEquals(OnnxJavaType.UINT8, inputInfo.type)
-            assertArrayEquals(longArrayOf(1, 256, 256, 3), inputInfo.shape)
+            val expectedInput = manager.activeModelSpec.inputSize.toLong()
+            assertTrue("Active model input must be 256 or 512", expectedInput == 256L || expectedInput == 512L)
+            assertArrayEquals(longArrayOf(1, expectedInput, expectedInput, 3), inputInfo.shape)
             assertEquals(OnnxJavaType.UINT8, outputInfo.type)
             // ORT shape inference resolves the graph's stale annotated 518x518 to its actual
             // output for a 256 input. Production must use runtime H/W, never sqrt or 518.

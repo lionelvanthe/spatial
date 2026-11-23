@@ -76,11 +76,11 @@ class SpatialModelBridge {
         nativeSetProperties(handle, intensity, depthCenter, rInverted, zoom, zoom3D, elasticity)
     }
 
-    fun updateRotate(tiltX: Float, tiltY: Float) {
-        val vb = vertexBuffer ?: return
-        if (handle == 0L) return
+    fun updateRotate(tiltX: Float, tiltY: Float): Boolean {
+        val vb = vertexBuffer ?: return false
+        if (handle == 0L) return false
         vb.position(0)
-        nativeUpdateRotate(handle, vb, tiltX, tiltY)
+        return nativeUpdateRotate(handle, vb, tiltX, tiltY)
     }
 
     fun updateShake(dt: Float, tiltX: Float, tiltY: Float) {
@@ -90,18 +90,18 @@ class SpatialModelBridge {
         nativeUpdateShake(handle, vb, dt, tiltX, tiltY)
     }
 
-    fun updateAnimated(progress: Float, patternId: Int) {
-        val vb = vertexBuffer ?: return
-        if (handle == 0L) return
+    fun updateAnimated(progress: Float, patternId: Int): Boolean {
+        val vb = vertexBuffer ?: return false
+        if (handle == 0L) return false
         vb.position(0)
-        nativeUpdateAnimated(handle, vb, progress, patternId)
+        return nativeUpdateAnimated(handle, vb, progress, patternId)
     }
 
-    fun updateZoomPan(zoom: Float, panX: Float, panY: Float) {
-        val vb = vertexBuffer ?: return
-        if (handle == 0L) return
+    fun updateZoomPan(zoom: Float, panX: Float, panY: Float): Boolean {
+        val vb = vertexBuffer ?: return false
+        if (handle == 0L) return false
         vb.position(0)
-        nativeUpdateZoomPan(handle, vb, zoom, panX, panY)
+        return nativeUpdateZoomPan(handle, vb, zoom, panX, panY)
     }
 
     fun applyImpulse(impulseX: Float, impulseY: Float) {
@@ -147,10 +147,10 @@ class SpatialModelBridge {
         elasticity: Float
     )
 
-    private external fun nativeUpdateRotate(handle: Long, vertexBuffer: FloatBuffer, tiltX: Float, tiltY: Float)
+    private external fun nativeUpdateRotate(handle: Long, vertexBuffer: FloatBuffer, tiltX: Float, tiltY: Float): Boolean
     private external fun nativeUpdateShake(handle: Long, vertexBuffer: FloatBuffer, dt: Float, tiltX: Float, tiltY: Float)
-    private external fun nativeUpdateAnimated(handle: Long, vertexBuffer: FloatBuffer, progress: Float, patternId: Int)
-    private external fun nativeUpdateZoomPan(handle: Long, vertexBuffer: FloatBuffer, zoom: Float, panX: Float, panY: Float)
+    private external fun nativeUpdateAnimated(handle: Long, vertexBuffer: FloatBuffer, progress: Float, patternId: Int): Boolean
+    private external fun nativeUpdateZoomPan(handle: Long, vertexBuffer: FloatBuffer, zoom: Float, panX: Float, panY: Float): Boolean
     private external fun nativeApplyImpulse(handle: Long, impulseX: Float, impulseY: Float)
     private external fun nativeResetPhysics(handle: Long)
 

@@ -47,11 +47,15 @@ class ZoomControlsTest {
         compose.runOnIdle { assertEquals(MotionLimits.MIN_ZOOM, viewModel.currentConfig.value.zoom, .001f) }
         drag("viewer_zoom", true)
         compose.runOnIdle { assertEquals(MotionLimits.MAX_ZOOM, viewModel.currentConfig.value.zoom, .001f) }
-        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText("Zoom 3D:", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).fetchSemanticsNode()
+        compose.onNodeWithText("Zoom 3D:", useUnmergedTree = true).fetchSemanticsNode()
+        drag("viewer_zoom_3d", true)
+        compose.runOnIdle { assertEquals(MotionLimits.MAX_ZOOM_3D, viewModel.currentConfig.value.zoom3D, .01f) }
+        drag("viewer_zoom_3d", false)
+        compose.runOnIdle { assertEquals(0f, viewModel.currentConfig.value.zoom3D, .01f) }
         compose.onNodeWithContentDescription("Animations").performClick()
-        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithText("Zoom 3D:", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).fetchSemanticsNode()
+        compose.onNodeWithText("Zoom 3D:", useUnmergedTree = true).fetchSemanticsNode()
     }
 
     @Test fun tab2HasElasticityZoomAndLookControls() {

@@ -104,4 +104,104 @@ class DepthPreprocessTest {
         val out = DepthPreprocess.smoothForParallax(ByteArray(40 * 30) { 90 }, 40, 30)
         assertTrue(out.all { it.toInt() == 0 })
     }
+
+    @Test fun percentileStretchExpandsCompressedDepthIgnoringOutliers() {
+        val src = ByteArray(1000) { i ->
+            when {
+                i < 5 -> 0.toByte()          // isolated dark outlier
+                i >= 995 -> 255.toByte()     // isolated bright outlier
+                i < 500 -> 90.toByte()       // compressed background
+                else -> 150.toByte()         // compressed foreground
+            }
+        }
+        val out = DepthPreprocess.stretchContrastPercentile(src, lowPct = 0.02f, highPct = 0.98f)
+        val bg = out[100].toInt() and 0xFF
+        val fg = out[700].toInt() and 0xFF
+        assertEquals(0, bg)
+        assertEquals(255, fg)
+    }
+
+    @Test fun meshRefinementWeldsAdjacentBodyPartsWhileKeepingBackgroundSeparate() {
+        val w = 64; val h = 64
+        // Background (10) on left, "neck" (165) in middle, "head/chin" (225) on right
+        val depth = ByteArray(w * h) { i ->
+            val x = i % w
+            when {
+                x < 22 -> 10.toByte()
+                x < 42 -> 165.toByte()
+                else -> 225.toByte()
+            }
+        }
+        val out = DepthPreprocess.refineDepthForMesh(depth, w, h)
+        val row = IntArray(w) { out[32 * w + it].toInt() and 0xFF }
+        assertTrue("Background must stay far (${row[4]})", row[4] < 25)
+        assertTrue("Head must stay near (${row[58]})", row[58] > 235)
+        // Step across head-neck seam (x=42) must be gentle so head does not detach from neck
+        val headNeckMaxStep = (38..46).maxOf { kotlin.math.abs(row[it] - row[it - 1]) }
+        assertTrue("Head-neck transition must be smooth (maxStep=$headNeckMaxStep)", headNeckMaxStep < 18)
+        // Foreground-background separation must remain strong
+        assertTrue("Subject-background separation must remain strong", row[32] - row[4] > 140)
+    }
+
+    @Test fun estimateDepthCenterTracksCentralSubject() {
+        val w = 40; val h = 40
+        // Bright foreground subject in center (depth ~210), dark background around (depth ~20)
+        val depth = ByteArray(w * h) { i ->
+            val x = i % w; val y = i / w
+            if (x in 10..30 && y in 8..32) 210.toByte() else 20.toByte()
+        }
+        val center = DepthPreprocess.estimateDepthCenter(depth, w, h)
+        assertTrue("Expected balanced center in [0.45, 0.72], got $center", center in 0.45f..0.72f)
+    }
+
+    @Test fun adaptiveModelSelectionFollowsPhotos3DTiers() {
+        // First run on SDK >= 29 prefers LARGE (model_512.onnx); on SDK < 29 chooses SMALL (model_256.onnx)
+        val firstModern = DepthPreprocess.selectAdaptiveModel(null, 0L, 0L, sdkInt = 29, preferLarge = true)
+        assertEquals(DepthPreprocess.DepthModelSpec.LARGE, firstModern.spec)
+        assertTrue(firstModern.shouldResetStats)
+
+        val firstOld = DepthPreprocess.selectAdaptiveModel(null, 0L, 0L, sdkInt = 28, preferLarge = true)
+        assertEquals(DepthPreprocess.DepthModelSpec.SMALL, firstOld.spec)
+
+        // Downgrade LARGE -> SMALL when avg >= 5000ms after >= 2 runs
+        val downgrade = DepthPreprocess.selectAdaptiveModel("l", avgDurationMs = 5200L, runCount = 2L, sdkInt = 34)
+        assertEquals(DepthPreprocess.DepthModelSpec.SMALL, downgrade.spec)
+        assertTrue(downgrade.shouldResetStats)
+
+        // Keep LARGE when fast enough
+        val keepLarge = DepthPreprocess.selectAdaptiveModel("l", avgDurationMs = 2100L, runCount = 3L, sdkInt = 34)
+        assertEquals(DepthPreprocess.DepthModelSpec.LARGE, keepLarge.spec)
+        assertFalse(keepLarge.shouldResetStats)
+
+        // Upgrade SMALL -> LARGE when avg < 2500ms after >= 4 runs on SDK >= 28
+        val upgrade = DepthPreprocess.selectAdaptiveModel("s", avgDurationMs = 1800L, runCount = 4L, sdkInt = 29)
+        assertEquals(DepthPreprocess.DepthModelSpec.LARGE, upgrade.spec)
+        assertTrue(upgrade.shouldResetStats)
+
+        // Stay SMALL when fewer than 4 runs
+        val staySmall = DepthPreprocess.selectAdaptiveModel("s", avgDurationMs = 1200L, runCount = 3L, sdkInt = 29)
+        assertEquals(DepthPreprocess.DepthModelSpec.SMALL, staySmall.spec)
+        assertFalse(staySmall.shouldResetStats)
+    }
+
+    @Test fun padTopLeftPixelsPreservesContentAndFillsBlackMargin() {
+        val white = 0xFFFFFFFF.toInt()
+        val black = 0xFF000000.toInt()
+        val content = IntArray(4 * 4) { white }
+        val padded = DepthPreprocess.padTopLeftPixels(content, 4, 4, 6, 6)
+        assertEquals(36, padded.size)
+        // Top-left 4x4 must remain white
+        for (y in 0 until 4) for (x in 0 until 4) {
+            assertEquals("($x,$y)", white, padded[y * 6 + x])
+        }
+        // Right 2px and bottom 2px margin must be opaque black
+        for (y in 0 until 6) {
+            assertEquals(black, padded[y * 6 + 4])
+            assertEquals(black, padded[y * 6 + 5])
+        }
+        for (x in 0 until 6) {
+            assertEquals(black, padded[4 * 6 + x])
+            assertEquals(black, padded[5 * 6 + x])
+        }
+    }
 }

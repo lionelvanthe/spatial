@@ -1,31 +1,22 @@
 # Bàn giao hiện tại
 
-- Ngày: 2026-11-15 (Asia/Saigon).
-- Phạm vi: Phân tích 2 file APK gốc (`com.vacuapps.photos3d.apk` + `config.arm64_v8a.apk`), xây dựng lại ứng dụng Spatial 3D theo kiến trúc **Adaptive 3D Triangle Mesh + Spring-Mass-Damper Lattice (C++ NDK/JNI) + Jetpack Compose Material 3**, và kiểm chứng trên thiết bị thật `JSN-L22`.
+- Ngày: 2026-11-23 (Asia/Saigon).
+- Phạm vi: `ZOOM-116` (`done`) — Đồng bộ hoàn toàn dải SeekBar `Zoom`, overscan biên và biên độ phóng đại/nhịp thở theo trải nghiệm trực tiếp song song `Photos 3D 1.1.6` và `Spatial` trên thiết bị thật `JSN-L22`.
 - Thực hiện:
-  - **Native C++ Engine (`app/src/main/cpp/`)**:
-    - `CMakeLists.txt`, `AdaptiveMeshBuilder`, `PatternAnimations` (16 pattern), `SpatialModelEngine` (lưới thích ứng + Spring-Mass-Damper từng đỉnh), `jni_bridge.cpp`.
-  - **OpenGL ES 2.0 & Export**:
-    - `SpatialModelBridge.kt`, `mesh_default.vert`, `mesh_default.frag`, `SpatialGLRenderer.kt` (VBO/IBO `glDrawElements`), `VideoExporter.kt` (`FrameRenderer` dùng chung `SpatialModelBridge`).
-    - Xóa mã ray-marching cũ (`LayerBuilder.kt`, `ParallaxShaders.kt`, `DepthProjection.kt`, `SpatialMesh.kt`) và test ray-marching cũ.
-  - **UI (`MainScreen.kt`)**: Khôi phục 4 tab (`Rotate`, `Shake`, `Animations`, `ZoomPan`), sửa icon/nhãn Tab 0 & Tab 1, bỏ `LookSlider` dư thừa.
-  - **Tests**:
-    - Unit tests: `MotionLimitsTest.kt`, `SpatialProjectionTest.kt`.
-    - Android instrumentation tests: Thêm `AdaptiveMeshRendererTest.kt` (kiểm tra adaptive vertex reduction, spring impulse physics, và render không lộ viền đen khi nghiêng mạnh), cập nhật `ViewerViewportLayoutTest.kt`, `ZoomControlsTest.kt`, `ZoomExportTest.kt` (dùng `size = 256` tương thích hardware H.264 encoder).
+  - **Dải giá trị Zoom (`app/src/main/java/com/example/spatial/data/SpatialSceneConfig.kt`)**:
+    - Đổi `MotionLimits.MIN_ZOOM = -1.0f`, `MotionLimits.MAX_ZOOM = 1.0f` khớp `activity_image_view_zoom_property_slider` (`-1..1`) và các file `_desc.dat` mẫu.
+  - **Overscan biên khớp `ik0.t`/`ik0.n` (`SpatialGLRenderer.kt`, `VideoExporter.kt`, `GifExporter.kt`)**:
+    - Nhân `fitScale` với `1.075f` đồng bộ cho Live Preview, Live Wallpaper, MP4 Export và GIF Export để khớp vùng dự phòng biên `0.05` của `Photos 3D 1.1.6`, triệt tiêu hoàn toàn viền đen 4 cạnh và mép uốn lượn theo depth khi kéo Zoom âm về `-1.0`.
+  - **Biên độ Zoom & Nhịp thở (`SpatialModelEngine.cpp`, `SpatialGLRenderer.kt`)**:
+    - Chuẩn hóa hệ số `zoomDeltaZ` về `0.26f` (cho biên độ phóng `+16.2%` ở `zoom = +1.0` và thu `-6.5%` ở `zoom = -1.0`, luôn nằm gọn trong overscan `1.075×` và khớp trực quan `Photos 3D 1.1.6`).
+    - Áp nhịp thở `0.5f * (1 - cos(2π·p))` (0 → 1 → 0) đồng bộ cho cả Tab Rotate (bỏ nền zoom tĩnh `45%`) lẫn Tab Animations/Export (`updateAnimated`).
+  - **Tests (`MotionLimitsTest.kt`, `ZoomExportTest.kt`)**:
+    - `MotionLimitsTest.kt`: Bổ sung `bundledSceneZoomsArePreservedOnPhotos3DScale`.
+    - `ZoomExportTest.kt`: Lấy mẫu frame giữa chu kỳ (`duration / 2`) để xác minh đỉnh phóng/thu của `MIN_ZOOM` vs `MAX_ZOOM`.
 - Kết quả kiểm tra:
-  - `./scripts/harness.ps1 -Mode Verify`: PASS (`D:\android\spatial\.harness\runs\20261118T150342579Z-fc517c25/result.json`).
-  - `./scripts/harness.ps1 -Mode Device`: FAILED (không có thiết bị ADB kết nối — `D:\android\spatial\.harness\runs\20261118T150446312Z-fe0e8191/result.json`).
-  - Khôi phục cơ chế hồi tâm động theo commit `e67e38f` (trước `9b27320`):
-    - `SpatialSensorTracker.kt`: dùng `relativeTilt.update(matrix)` (bỏ SLERP bên trong `RelativeTilt`), giữ ưu tiên `TYPE_GAME_ROTATION_VECTOR` và `remapForDisplay`.
-    - `SpatialGLRenderer.kt`: khôi phục `updateTiltState` với `restingBoost` (`1.65f` khi nghỉ, giảm xuống `0.4f` khi đang nghiêng nhanh), `edgeBoost = 1.0f + offsetDistance * 1.4f`, `recenterRate = 1.95f * restingBoost * edgeBoost`, và `softCompress(c) = c / sqrt(1 + 0.35 * c^2)` với hệ số `* 1.35f`.
-  - Khắc phục tình trạng rích rắc (zigzag) ở mép giao nhau giữa vật thể gần-xa:
-    - `AdaptiveMeshBuilder.cpp`: bổ sung Depth-Aware Diagonal Split trong `tessellateSquareWithMidpoints` (`|d[tl]-d[br]| <= |d[tr]-d[bl]|` thì nối `tl-br`, ngược lại nối `tr-bl`), giúp cạnh tam giác bám dọc theo mép chéo thay vì cắt ngang gây răng cưa.
-  - Đồng bộ xử lý cảm biến khi nghiêng máy theo APK mẫu (`Lqc1`, `Lrc1`, `Lpc1`):
-    - `SpatialSensorTracker.kt`: ưu tiên `Sensor.TYPE_GAME_ROTATION_VECTOR` (tránh trôi/nhiễu từ kế của `TYPE_ROTATION_VECTOR`), fallback `TYPE_ROTATION_VECTOR` -> `TYPE_ACCELEROMETER`, và remap hệ tọa độ theo display rotation.
-    - `RelativeTilt.kt`: thêm `updateWithAutoCenter(matrix, dtMs)` tính trực tiếp 2 thành phần nghiêng mặt phẳng màn hình (không cộng gộp yaw + roll và không chia `0.55f`), lọc mượt theo `dtMs` (`alpha = lerp(0.30, 0.90)` sau giai đoạn ổn định đầu), và kéo ma trận tham chiếu về vị trí nghỉ bằng Quaternion SLERP (`t = dtMs * 0.0028f`).
-    - `SpatialGLRenderer.kt`: bỏ auto-centering trùng lặp (`gyroNeutralX/Y`) và `softCompress((gx - gyroNeutralX) * 1.35f)` trong `updateTiltState`.
-- Chưa xác minh / Lưu ý:
-  - Chưa kiểm tra trực quan Live Wallpaper trên màn hình chính (`WALLPAPER-001`) và cảm biến nghiêng vật lý bằng tay trên thiết bị thật.
-  - Tab `Gallery` mặc định chưa hiển thị 3 scene `Sample` (các scene mẫu hiện đang nằm trong tab `Wallpapers`).
-- Bước tiếp theo:
-  - Nếu muốn giống app gốc hơn ở màn hình đầu, có thể hiển thị thêm 3 mục `Sample` (`alpine`, `anime_fighter`, `woman_selfie`) ở tab `Gallery` và kiểm tra `WALLPAPER-001` trên thiết bị thật.
+  - `git diff --check`: **PASS**.
+  - `./scripts/harness.ps1 -Mode Verify`: **PASS** (`.harness/runs/20261123T135624507Z-a92a7871/result.json`) — `:app:testDebugUnitTest`, `:app:lintDebug`, CMake C++ (`arm64-v8a`, `armeabi-v7a`, `x86_64`), `:app:assembleDebug` đều `BUILD SUCCESSFUL`.
+  - `./scripts/harness.ps1 -Mode Device` trên thiết bị thật `JSN-L22` (Android 10): **PASS** (`.harness/runs/20261123T135743338Z-af9a0aaa/result.json`) — `11/11` `connectedDebugAndroidTest` PASS (`0 failed`, `0 errors`, `0 skipped`).
+  - **Đối chiếu trực quan trên máy thật `JSN-L22`**: Đã mở và chụp song song `Photos 3D 1.1.6` và `Spatial` (bản mới đã cài lên máy) với cùng ảnh `Portrait Selfie` (`woman_selfie`) ở `Zoom = 0`, `+1.0`, `-1.0`: khung hình kín 100% không còn viền đen khi zoom âm, tỷ lệ crop mặc định và biên độ phóng/thu khớp `Photos 3D 1.1.6`.
+- Chưa xác minh / Bước tiếp theo:
+  - Chưa kiểm tra thủ công trực quan Live Wallpaper ngoài màn hình chính (`WALLPAPER-001`) và mở xem file GIF xuất ra trong ứng dụng Thư viện ảnh.

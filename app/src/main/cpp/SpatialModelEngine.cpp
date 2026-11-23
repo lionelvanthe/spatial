@@ -7,8 +7,14 @@ namespace spatial {
 
 namespace {
 
+constexpr float TWO_PI = 6.28318530717958647692f;
+
+inline float safeFinite(float v, float fallback) {
+    return std::isfinite(v) ? v : fallback;
+}
+
 inline float computeInternalIntensity(float uiIntensity) {
-    float clamped = std::clamp(uiIntensity, 0.0f, 1.25f);
+    float clamped = std::clamp(safeFinite(uiIntensity, 0.8f), 0.0f, 1.25f);
     return 0.40f + 0.70f * clamped;
 }
 
@@ -26,7 +32,8 @@ void SpatialModelEngine::initialize(
     float imageAspect,
     int gridSize
 ) {
-    mesh_ = AdaptiveMeshBuilder::build(depthBytes, depthWidth, depthHeight, imageAspect, gridSize);
+    float safeAspect = (std::isfinite(imageAspect) && imageAspect > 0.01f) ? imageAspect : 1.0f;
+    mesh_ = AdaptiveMeshBuilder::build(depthBytes, depthWidth, depthHeight, safeAspect, gridSize);
 
     const size_t n = mesh_.vertices.size();
     nodes_.resize(n);
@@ -41,6 +48,7 @@ void SpatialModelEngine::initialize(
 
     rebuildSprings();
     depthDirty_ = true;
+    hasLastParallax_ = false;
     updateCurvedDepths();
 }
 
@@ -89,15 +97,17 @@ void SpatialModelEngine::setProperties(
     float zoom3D,
     float elasticity
 ) {
-    if (intensity_ != intensity || rInverted_ != rInverted) {
-        intensity_ = std::clamp(intensity, 0.0f, 1.25f);
+    float safeIntensity = std::clamp(safeFinite(intensity, 0.8f), 0.0f, 1.25f);
+    if (intensity_ != safeIntensity || rInverted_ != rInverted) {
+        intensity_ = safeIntensity;
         rInverted_ = rInverted;
         depthDirty_ = true;
+        hasLastParallax_ = false;
     }
-    depthCenter_ = std::clamp(depthCenter, 0.0f, 1.0f);
-    zoom_ = std::clamp(zoom, -1.0f, 1.0f);
-    zoom3D_ = std::clamp(zoom3D, 0.0f, 1.0f);
-    elasticity_ = std::clamp(elasticity, 0.0f, 1.0f);
+    depthCenter_ = std::clamp(safeFinite(depthCenter, 0.5f), 0.0f, 1.0f);
+    zoom_ = std::clamp(safeFinite(zoom, 0.0f), -1.0f, 1.0f);
+    zoom3D_ = std::clamp(safeFinite(zoom3D, 0.0f), 0.0f, 1.0f);
+    elasticity_ = std::clamp(safeFinite(elasticity, 0.5f), 0.0f, 1.0f);
 }
 
 void SpatialModelEngine::updateCurvedDepths() {
@@ -112,7 +122,7 @@ void SpatialModelEngine::updateCurvedDepths() {
     depthDirty_ = false;
 }
 
-void SpatialModelEngine::writeParallaxVertices(
+bool SpatialModelEngine::writeParallaxVertices(
     float* outVertices,
     float shiftX,
     float shiftY,
@@ -121,29 +131,57 @@ void SpatialModelEngine::writeParallaxVertices(
     float panX,
     float panY
 ) {
-    if (!outVertices) return;
+    if (!outVertices) return false;
     updateCurvedDepths();
 
-    const float effZoom = (zoomOverride < 0.0f) ? (zoomOverride * 0.5f) : zoomOverride;
-    const float z3dActive = (std::fabs(zoomOverride) >= 0.1f) ? zoom3D_ : 0.0f;
-    // Exact ImageDynamicModel::updateProperties + applyVerticesShift scaled from height ~0.95 to 2.0
+    const float safeShiftX = std::clamp(safeFinite(shiftX, 0.0f), -1.0f, 1.0f);
+    const float safeShiftY = std::clamp(safeFinite(shiftY, 0.0f), -1.0f, 1.0f);
+    const float safeCenter = std::clamp(safeFinite(effectiveDepthCenter, 0.5f), 0.0f, 1.0f);
+    const float safeZoom = std::clamp(safeFinite(zoomOverride, 0.0f), -1.0f, 1.0f);
+    const float safePanX = std::clamp(safeFinite(panX, 0.0f), -2.0f, 2.0f);
+    const float safePanY = std::clamp(safeFinite(panY, 0.0f), -2.0f, 2.0f);
+
+    // Dirty-check matching Photos 3D ImageDynamicModel (1e-4 threshold) to skip redundant vertex writes & VBO uploads.
+    constexpr float kDirtyEps = 0.0001f;
+    if (hasLastParallax_ &&
+        lastOutVertices_ == outVertices &&
+        lastRInverted_ == rInverted_ &&
+        std::fabs(safeShiftX - lastShiftX_) <= kDirtyEps &&
+        std::fabs(safeShiftY - lastShiftY_) <= kDirtyEps &&
+        std::fabs(safeCenter - lastCenter_) <= kDirtyEps &&
+        std::fabs(safeZoom - lastZoom_) <= kDirtyEps &&
+        std::fabs(zoom3D_ - lastZoom3D_) <= kDirtyEps &&
+        std::fabs(safePanX - lastPanX_) <= kDirtyEps &&
+        std::fabs(safePanY - lastPanY_) <= kDirtyEps &&
+        std::fabs(intensity_ - lastIntensity_) <= kDirtyEps) {
+        return false;
+    }
+
+    const float effZoom = (safeZoom < 0.0f) ? (safeZoom * 0.5f) : safeZoom;
+    // Exact Photos 3D 1.1.6 proportions from ImageDynamicModel::updateProperties (0x25890) & shiftVertices (0x262a8):
+    // baseZ = cd * 0.048f (0.023f scaled 0.95->2.0) prevents subject bulging when changing intensity.
     const float internalIntensity = computeInternalIntensity(intensity_);
-    const float maxShift = 0.084f * internalIntensity;
+    const float maxShift = 0.088f * internalIntensity;
+    const float z3d = zoom3D_;
+    const float flatZoomTerm = effZoom * (1.0f - z3d);
+    const float depthZoomWeight = effZoom * z3d;
 
     const size_t n = mesh_.vertices.size();
     for (size_t i = 0; i < n; ++i) {
         const MeshVertex& mv = mesh_.vertices[i];
         const float cd = nodes_[i].curvedDepth;
-        const float s0 = cd - effectiveDepthCenter;
+        const float s0 = cd - safeCenter;
 
-        // Parallax shift (edges stay anchored with edgeWeight == 0)
-        float px = mv.baseX + shiftX * s0 * maxShift * mv.edgeWeight + panX;
-        float py = mv.baseY + shiftY * s0 * maxShift * mv.edgeWeight + panY;
+        // Clean linear parallax shift: keeps architectural lines straight and preserves
+        // exact subject proportions across all intensity/zoom values (edges anchored at border).
+        float px = mv.baseX + safeShiftX * s0 * maxShift * mv.edgeWeight + safePanX;
+        float py = mv.baseY + safeShiftY * s0 * maxShift * mv.edgeWeight + safePanY;
 
-        // Perspective Z-zoom matching ImageDynamicModel::applyVerticesShift
-        float zFactor = (effZoom >= 0.0f) ? cd : (1.0f - cd);
-        float zWeight = (1.0f - z3dActive) + z3dActive * zFactor;
-        float pz = cd * 0.048f + effZoom * 0.55f * zWeight;
+        // Depth-weighted 3D zoom matching Photos 3D 1.1.6 visual magnification on screen:
+        // +15-16% at zoom=+1.0 and -6.5% at zoom=-1.0 (stays inside 1.075x overscan, zero black borders).
+        const float depthTerm = (effZoom > 0.0f) ? cd : (1.0f - cd);
+        const float zoomDeltaZ = (flatZoomTerm + depthZoomWeight * depthTerm) * 0.26f;
+        float pz = cd * 0.048f + zoomDeltaZ;
 
         const size_t baseIdx = i * 5;
         outVertices[baseIdx + 0] = px;
@@ -152,33 +190,60 @@ void SpatialModelEngine::writeParallaxVertices(
         outVertices[baseIdx + 3] = mv.u;
         outVertices[baseIdx + 4] = mv.v;
     }
+
+    hasLastParallax_ = true;
+    lastOutVertices_ = outVertices;
+    lastShiftX_ = safeShiftX;
+    lastShiftY_ = safeShiftY;
+    lastCenter_ = safeCenter;
+    lastZoom_ = safeZoom;
+    lastZoom3D_ = zoom3D_;
+    lastPanX_ = safePanX;
+    lastPanY_ = safePanY;
+    lastIntensity_ = intensity_;
+    lastRInverted_ = rInverted_;
+    return true;
 }
 
-void SpatialModelEngine::updateRotate(float* outVertices, float tiltX, float tiltY) {
-    float sx = std::clamp(tiltX, -1.0f, 1.0f);
-    float sy = std::clamp(tiltY, -1.0f, 1.0f);
-    writeParallaxVertices(outVertices, sx, sy, depthCenter_, zoom_, 0.0f, 0.0f);
+bool SpatialModelEngine::updateRotate(float* outVertices, float tiltX, float tiltY) {
+    float sx = std::clamp(safeFinite(tiltX, 0.0f), -1.0f, 1.0f);
+    float sy = std::clamp(safeFinite(tiltY, 0.0f), -1.0f, 1.0f);
+    return writeParallaxVertices(outVertices, sx, sy, depthCenter_, zoom_, 0.0f, 0.0f);
 }
 
-void SpatialModelEngine::updateAnimated(float* outVertices, float progress, int patternId) {
+bool SpatialModelEngine::updateAnimated(float* outVertices, float progress, int patternId) {
+    float safeProgress = safeFinite(progress, 0.0f);
+    float p = std::fmod(safeProgress, 1.0f);
+    if (p < 0.0f) p += 1.0f;
+    // Match Photos 3D 1.1.6 ImageDynamicModel::performAnimatedUpdate (0x260e0):
+    // zoom breathes smoothly from 0 -> zoom_ -> 0 over each loop cycle via 0.5 * (1 - cos(2*pi*p)).
+    float breathZoom = zoom_ * (0.5f * (1.0f - std::cos(p * TWO_PI)));
+    if (patternId == static_cast<int>(PatternId::ZOOM)) {
+        float animZoom = std::sin(p * TWO_PI) * 0.25f * std::clamp(intensity_, 0.0f, 1.25f);
+        return writeParallaxVertices(outVertices, 0.0f, 0.0f, depthCenter_, breathZoom + animZoom, 0.0f, 0.0f);
+    }
     float sx = 0.0f, sy = 0.0f;
-    PatternAnimations::sample(patternId, progress, sx, sy);
-    writeParallaxVertices(outVertices, sx, sy, depthCenter_, zoom_, 0.0f, 0.0f);
+    PatternAnimations::sample(patternId, p, sx, sy);
+    return writeParallaxVertices(outVertices, sx, sy, depthCenter_, breathZoom, 0.0f, 0.0f);
 }
 
-void SpatialModelEngine::updateZoomPan(float* outVertices, float zoom, float panX, float panY) {
-    writeParallaxVertices(outVertices, 0.0f, 0.0f, depthCenter_, zoom, panX, panY);
+bool SpatialModelEngine::updateZoomPan(float* outVertices, float zoom, float panX, float panY) {
+    return writeParallaxVertices(outVertices, 0.0f, 0.0f, depthCenter_, zoom, panX, panY);
 }
 
 void SpatialModelEngine::applyImpulse(float impulseX, float impulseY) {
     updateCurvedDepths();
+    const float ix = std::clamp(safeFinite(impulseX, 0.0f), -12.0f, 12.0f);
+    const float iy = std::clamp(safeFinite(impulseY, 0.0f), -12.0f, 12.0f);
+    const float internalIntensity = computeInternalIntensity(intensity_);
     const size_t n = mesh_.vertices.size();
     for (size_t i = 0; i < n; ++i) {
         const MeshVertex& mv = mesh_.vertices[i];
         if (mv.isBorder) continue;
-        float factor = (nodes_[i].curvedDepth - depthCenter_) * mv.edgeWeight;
-        nodes_[i].velX += impulseX * factor;
-        nodes_[i].velY += impulseY * factor;
+        // Weight impulse by depth relative to background so foreground subject jiggles vividly
+        const float depthWeight = (0.35f + 0.95f * nodes_[i].curvedDepth) * internalIntensity * mv.edgeWeight;
+        nodes_[i].velX += ix * depthWeight;
+        nodes_[i].velY += iy * depthWeight;
     }
 }
 
@@ -198,18 +263,18 @@ void SpatialModelEngine::updateShake(float* outVertices, float dt, float tiltX, 
     if (!outVertices) return;
     updateCurvedDepths();
 
-    float clampedDt = std::clamp(dt, 0.0005f, 0.04f);
+    float clampedDt = std::clamp(safeFinite(dt, 0.016f), 0.0005f, 0.04f);
     int subSteps = std::clamp(static_cast<int>(std::ceil(clampedDt / 0.008f)), 1, 4);
     float subDt = clampedDt / static_cast<float>(subSteps);
 
-    const float maxShift = 0.084f * computeInternalIntensity(intensity_);
-    const float sx = std::clamp(tiltX, -1.0f, 1.0f);
-    const float sy = std::clamp(tiltY, -1.0f, 1.0f);
+    const float maxShift = 0.112f * computeInternalIntensity(intensity_);
+    const float sx = std::clamp(safeFinite(tiltX, 0.0f), -1.0f, 1.0f);
+    const float sy = std::clamp(safeFinite(tiltY, 0.0f), -1.0f, 1.0f);
 
     // Elasticity [0..1]: higher elasticity -> bouncier (lower damping, lively spring)
-    const float kStab = 95.0f - 45.0f * elasticity_;   // 95 -> 50
-    const float cDamp = 6.5f - 4.3f * elasticity_;     // 6.5 -> 2.2
-    const float kStruct = 28.0f + 24.0f * elasticity_; // neighbor coupling
+    const float kStab = 90.0f - 42.0f * elasticity_;   // 90 -> 48
+    const float cDamp = 6.0f - 4.0f * elasticity_;     // 6.0 -> 2.0
+    const float kStruct = 32.0f + 28.0f * elasticity_; // neighbor coupling
 
     const size_t n = mesh_.vertices.size();
     for (size_t i = 0; i < n; ++i) {
@@ -271,7 +336,7 @@ void SpatialModelEngine::updateShake(float* outVertices, float dt, float tiltX, 
             // Safety clamp against extreme numerical spikes
             float dx = node.posX - node.anchorX;
             float dy = node.posY - node.anchorY;
-            float maxOffset = 0.14f;
+            float maxOffset = 0.22f;
             if (dx * dx + dy * dy > maxOffset * maxOffset) {
                 float invLen = maxOffset / std::sqrt(dx * dx + dy * dy);
                 node.posX = node.anchorX + dx * invLen;
@@ -283,21 +348,27 @@ void SpatialModelEngine::updateShake(float* outVertices, float dt, float tiltX, 
     }
 
     const float effZoom = (zoom_ < 0.0f) ? (zoom_ * 0.5f) : zoom_;
-    const float z3dActive = (std::fabs(zoom_) >= 0.1f) ? zoom3D_ : 0.0f;
+    const float z3d = zoom3D_;
+    const float flatZoomTerm = effZoom * (1.0f - z3d);
+    const float depthZoomWeight = effZoom * z3d;
 
     for (size_t i = 0; i < n; ++i) {
         const MeshVertex& mv = mesh_.vertices[i];
         const float cd = nodes_[i].curvedDepth;
-        float zFactor = (effZoom >= 0.0f) ? cd : (1.0f - cd);
-        float zWeight = (1.0f - z3dActive) + z3dActive * zFactor;
+        const float depthTerm = (effZoom > 0.0f) ? cd : (1.0f - cd);
+        const float zoomDeltaZ = (flatZoomTerm + depthZoomWeight * depthTerm) * 0.26f;
+        const float dispX = nodes_[i].posX - nodes_[i].anchorX;
+        const float dispY = nodes_[i].posY - nodes_[i].anchorY;
+        const float zBounce = std::sqrt(dispX * dispX + dispY * dispY) * 0.20f * cd;
 
         const size_t baseIdx = i * 5;
         outVertices[baseIdx + 0] = nodes_[i].posX;
         outVertices[baseIdx + 1] = nodes_[i].posY;
-        outVertices[baseIdx + 2] = cd * 0.048f + effZoom * 0.55f * zWeight;
+        outVertices[baseIdx + 2] = cd * 0.048f + zoomDeltaZ + zBounce;
         outVertices[baseIdx + 3] = mv.u;
         outVertices[baseIdx + 4] = mv.v;
     }
+    hasLastParallax_ = false;
 }
 
 } // namespace spatial

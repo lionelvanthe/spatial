@@ -49,10 +49,10 @@ public:
         float elasticity
     );
 
-    void updateRotate(float* outVertices, float tiltX, float tiltY);
+    bool updateRotate(float* outVertices, float tiltX, float tiltY);
     void updateShake(float* outVertices, float dt, float tiltX, float tiltY);
-    void updateAnimated(float* outVertices, float progress, int patternId);
-    void updateZoomPan(float* outVertices, float zoom, float panX, float panY);
+    bool updateAnimated(float* outVertices, float progress, int patternId);
+    bool updateZoomPan(float* outVertices, float zoom, float panX, float panY);
 
     void applyImpulse(float impulseX, float impulseY);
     void resetPhysics();
@@ -72,9 +72,22 @@ private:
     float depthScale_ = 1.0f;
     bool depthDirty_ = true;
 
+    // Dirty-check cache matching Photos 3D ImageDynamicModel (1e-4 epsilon)
+    bool hasLastParallax_ = false;
+    const float* lastOutVertices_ = nullptr;
+    float lastShiftX_ = 0.0f;
+    float lastShiftY_ = 0.0f;
+    float lastCenter_ = 0.5f;
+    float lastZoom_ = 0.0f;
+    float lastZoom3D_ = 0.0f;
+    float lastPanX_ = 0.0f;
+    float lastPanY_ = 0.0f;
+    float lastIntensity_ = 0.8f;
+    bool lastRInverted_ = false;
+
     void rebuildSprings();
     void updateCurvedDepths();
-    void writeParallaxVertices(
+    bool writeParallaxVertices(
         float* outVertices,
         float shiftX,
         float shiftY,

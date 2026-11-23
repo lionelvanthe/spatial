@@ -52,8 +52,8 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,15 +62,16 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -135,6 +136,7 @@ val ALL_MOTION_PATTERNS = listOf(
     MotionPatternItem("horizontal_rapid", "Rapid H", R.drawable.pattern_horizontal_rapid),
     MotionPatternItem("vertical_rapid", "Rapid V", R.drawable.pattern_vertical_rapid),
     MotionPatternItem("square_cw", "Square CW", R.drawable.pattern_square_cw),
+    MotionPatternItem("square_ccw", "Square CCW", R.drawable.pattern_square_ccw),
     MotionPatternItem("triangular_cw", "Triangle", R.drawable.pattern_triangular_cw),
     MotionPatternItem("zoom", "Zoom", R.drawable.ic_zoom_prop),
 )
@@ -156,36 +158,39 @@ fun MainScreen(viewModel: SpatialViewModel) {
         viewModel.exportEvents.collect { event ->
             when (event) {
                 is ExportEvent.Saved ->
-                    Toast.makeText(context, "Saved video: ${event.location}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, "Saved: ${event.location}", Toast.LENGTH_LONG).show()
                 is ExportEvent.Failed ->
                     Toast.makeText(context, "Export failed: ${event.message}", Toast.LENGTH_LONG).show()
                 is ExportEvent.Share -> {
                     val send = Intent(Intent.ACTION_SEND).apply {
-                        type = "video/mp4"
+                        type = event.mimeType
                         putExtra(Intent.EXTRA_STREAM, event.uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    context.startActivity(Intent.createChooser(send, "Share 3D video"))
+                    val title = if (event.mimeType == "image/gif") "Share 3D GIF" else "Share 3D video"
+                    context.startActivity(Intent.createChooser(send, title))
                 }
             }
         }
     }
 
     var screenMode by remember { mutableStateOf(ScreenMode.GALLERY) }
-    var galleryTab by remember { mutableIntStateOf(0) } // 0: My photos, 1: Sample scenes
-    var isFullscreen by remember { mutableStateOf(false) }
+    var galleryTab by remember { mutableIntStateOf(0) } // 0: My photos & samples, 1: Wallpapers
+    var showMenuDialog by remember { mutableStateOf(false) }
+    var pendingExportShare by remember { mutableStateOf<Boolean?>(null) }
 
-    // Sub-panels in Viewer mode: 0 = none, 1 = Patterns/Speed, 2 = Fine-Tune
-    var activeViewerPanel by remember { mutableIntStateOf(0) }
+    val hasTiltSensor = remember(context) { SpatialSensorTracker.hasTiltSensor(context) }
+    val defaultViewerTab = if (hasTiltSensor) 0 else 2
 
-    // Bottom 3 Tabs: 0: Rotate (Rotational Tilt), 1: Shake (Jelly Physics), 2: Animations
-    var selectedBottomTab by remember { mutableIntStateOf(0) }
+    // Bottom 4 Tabs: 0: Rotate (hidden if no tilt sensor), 1: Shake, 2: Animations, 3: ZoomPan
+    var selectedBottomTab by remember { mutableIntStateOf(defaultViewerTab) }
     var toolbarHeightPx by remember { mutableIntStateOf(0) }
     var bottomBarHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     var showControls by remember { mutableStateOf(false) }
     var awaitingImportedScene by remember { mutableStateOf(false) }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
     val surfaceViewRef = remember { mutableStateOf<SpatialGLSurfaceView?>(null) }
     // Last bitmap the renderer has actually drawn; until it matches the scene, the old one is on screen.
     var drawnBitmap by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
@@ -194,12 +199,8 @@ fun MainScreen(viewModel: SpatialViewModel) {
 
     // Handle back button when in viewer (matches rk0.x() in sample app)
     BackHandler(enabled = screenMode == ScreenMode.VIEWER) {
-        if (isFullscreen) {
-            isFullscreen = false
-        } else if (showControls) {
+        if (showControls) {
             showControls = false
-        } else if (activeViewerPanel != 0) {
-            activeViewerPanel = 0
         } else {
             screenMode = ScreenMode.GALLERY
         }
@@ -221,7 +222,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
         if (awaitingImportedScene && !isProcessing) {
             awaitingImportedScene = false
             if (currentScene?.isCustom == true) {
-                selectedBottomTab = 0
+                selectedBottomTab = defaultViewerTab
                 showControls = false
                 screenMode = ScreenMode.VIEWER
             } else {
@@ -244,9 +245,37 @@ fun MainScreen(viewModel: SpatialViewModel) {
         if (isProcessing && screenMode == ScreenMode.GALLERY) screenMode = ScreenMode.SETUP
     }
 
-    // Connect Sensor Tracker
-    DisposableEffect(isSensorEnabled) {
-        val tracker = SpatialSensorTracker(context) { tiltX, tiltY ->
+    // Pause GL rendering and sensor tracking when backgrounded or when the viewer is hidden behind Gallery/Setup.
+    val activeSurfaceView = surfaceViewRef.value
+    DisposableEffect(lifecycleOwner, screenMode, activeSurfaceView) {
+        val activeViewer = screenMode == ScreenMode.VIEWER
+        val isResumed = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        if (activeViewer && isResumed) {
+            activeSurfaceView?.onResume()
+        } else {
+            activeSurfaceView?.onPause()
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> if (screenMode == ScreenMode.VIEWER) activeSurfaceView?.onResume()
+                Lifecycle.Event.ON_PAUSE -> activeSurfaceView?.onPause()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Connect Sensor Tracker only while the Activity is resumed AND viewing a 3D scene.
+    DisposableEffect(lifecycleOwner, isSensorEnabled, screenMode) {
+        val tracker = SpatialSensorTracker(
+            context = context,
+            onLinearAcceleration = { ax, ay ->
+                surfaceViewRef.value?.renderer?.onLinearAcceleration(ax, ay)
+            }
+        ) { tiltX, tiltY ->
             surfaceViewRef.value?.renderer?.let { r ->
                 r.gyroX = tiltX
                 r.gyroY = tiltY
@@ -256,9 +285,21 @@ fun MainScreen(viewModel: SpatialViewModel) {
             r.gyroX = 0f
             r.gyroY = 0f
         }
-        if (isSensorEnabled) tracker.start()
+        val shouldTrack = isSensorEnabled && screenMode == ScreenMode.VIEWER
+        if (shouldTrack && lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            tracker.start()
+        }
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> if (shouldTrack) tracker.start()
+                Lifecycle.Event.ON_PAUSE -> tracker.stop()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
 
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             tracker.stop()
         }
     }
@@ -288,7 +329,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
         ) {
             val image = currentScene?.fullImageBitmap
             val viewportModifier = if (screenMode == ScreenMode.VIEWER && image != null) {
-                Modifier.aspectRatio(image.width.toFloat() / image.height)
+                Modifier.aspectRatio(image.width.coerceAtLeast(1).toFloat() / image.height.coerceAtLeast(1).toFloat())
             } else {
                 Modifier.fillMaxSize()
             }
@@ -324,6 +365,13 @@ fun MainScreen(viewModel: SpatialViewModel) {
                     } else {
                         view.renderer.sceneConfig = currentConfig
                     }
+                },
+                onRelease = { view ->
+                    view.onPause()
+                    view.renderer.releaseNative()
+                    if (surfaceViewRef.value === view) {
+                        surfaceViewRef.value = null
+                    }
                 }
             )
             if (screenMode == ScreenMode.VIEWER && sceneLoading) {
@@ -347,16 +395,17 @@ fun MainScreen(viewModel: SpatialViewModel) {
         ) {
             GalleryScreen(
                 scenes = when (galleryTab) {
-                    0 -> scenes.filter { it.isCustom }
+                    0 -> scenes.filter { it.isCustom || it.folderPath.startsWith("samples/") }
                     else -> scenes.filterNot { it.isCustom }
                 },
                 selectedSceneId = currentScene?.id ?: "",
                 currentTab = galleryTab,
                 onTabSelect = { galleryTab = it },
+                onMenuClick = { showMenuDialog = true },
                 onSelectScene = { scene ->
                     viewModel.selectScene(scene)
                     showControls = false
-                    selectedBottomTab = 0
+                    selectedBottomTab = defaultViewerTab
                     screenMode = ScreenMode.VIEWER
                 },
                 onAddNewPhoto = {
@@ -365,6 +414,56 @@ fun MainScreen(viewModel: SpatialViewModel) {
                             ActivityResultContracts.PickVisualMedia.ImageOnly
                         )
                     )
+                }
+            )
+        }
+
+        if (showMenuDialog) {
+            AlertDialog(
+                onDismissRequest = { showMenuDialog = false },
+                title = { Text("Spatial 3D") },
+                text = {
+                    Text(
+                        "Tạo ảnh 3D/parallax từ ảnh thường bằng AI ước lượng chiều sâu trên thiết bị (model 512/256 thích ứng).\n\n" +
+                            "• Nghiêng máy hoặc kéo tay để xem hiệu ứng 3D.\n" +
+                            "• Chạm đúp để hồi tâm.\n" +
+                            "• Dùng tab Animations để xuất video MP4 hoặc ảnh động GIF."
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = { showMenuDialog = false }) {
+                        Text("Đóng")
+                    }
+                }
+            )
+        }
+
+        if (pendingExportShare != null) {
+            val isShareAction = pendingExportShare == true
+            AlertDialog(
+                onDismissRequest = { pendingExportShare = null },
+                title = { Text(if (isShareAction) "Chia sẻ hiệu ứng 3D" else "Lưu hiệu ứng 3D") },
+                text = { Text("Chọn định dạng xuất (không watermark):") },
+                confirmButton = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TextButton(onClick = {
+                            pendingExportShare = null
+                            viewModel.exportGif(share = isShareAction)
+                        }) {
+                            Text("Ảnh động GIF")
+                        }
+                        Button(onClick = {
+                            pendingExportShare = null
+                            viewModel.exportVideo(share = isShareAction)
+                        }) {
+                            Text("Video MP4")
+                        }
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingExportShare = null }) {
+                        Text("Hủy")
+                    }
                 }
             )
         }
@@ -382,9 +481,8 @@ fun MainScreen(viewModel: SpatialViewModel) {
             ViewerScreen(
                 scene = currentScene,
                 config = currentConfig,
-                isFullscreen = isFullscreen,
-                activePanel = activeViewerPanel,
                 isSensorEnabled = isSensorEnabled,
+                hasTiltSensor = hasTiltSensor,
                 selectedBottomTab = selectedBottomTab,
                 showControls = showControls,
                 onToolbarHeightChanged = { toolbarHeightPx = it },
@@ -401,14 +499,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 },
                 onToggleControls = { showControls = !showControls },
                 onBackToGallery = { screenMode = ScreenMode.GALLERY },
-                onToggleFullscreen = { isFullscreen = !isFullscreen },
                 onToggleSensor = { viewModel.toggleSensor() },
-                onTogglePanel = { panel ->
-                    activeViewerPanel = if (activeViewerPanel == panel) 0 else panel
-                },
-                onQuickInvert = {
-                    viewModel.updateInverted(!currentConfig.rInverted)
-                },
                 onSelectPattern = { viewModel.updatePattern(it) },
                 onUpdateSpeed = { viewModel.updateSpeed(it) },
                 onUpdateIntensity = { viewModel.updateIntensity(it) },
@@ -418,15 +509,23 @@ fun MainScreen(viewModel: SpatialViewModel) {
                     viewModel.updateZoom(zoomVal)
                     surfaceViewRef.value?.renderer?.touchZoom = 0.0f
                 },
+                onUpdateZoom3D = { viewModel.updateZoom3D(it) },
                 onUpdateInverted = { viewModel.updateInverted(it) },
-                onUpdateConfig = { viewModel.updateConfig(it) },
-                onReset = {
-                    viewModel.resetToDefault()
-                    surfaceViewRef.value?.renderer?.resetTouchState()
+                onDeleteOrReset = {
+                    val scene = currentScene
+                    if (scene != null && scene.isCustom) {
+                        viewModel.deleteCustomScene(scene.id)
+                        screenMode = ScreenMode.GALLERY
+                        Toast.makeText(context, "Đã xóa ảnh", Toast.LENGTH_SHORT).show()
+                    } else {
+                        viewModel.resetToDefault()
+                        surfaceViewRef.value?.renderer?.resetTouchState()
+                        Toast.makeText(context, "Đã đặt lại thông số mặc định", Toast.LENGTH_SHORT).show()
+                    }
                 },
                 onSetWallpaper = { viewModel.launchSetLiveWallpaperIntent() },
-                onSave = { viewModel.exportVideo(share = false) },
-                onShare = { viewModel.exportVideo(share = true) }
+                onSave = { pendingExportShare = false },
+                onShare = { pendingExportShare = true }
             )
         }
 
@@ -567,6 +666,7 @@ fun GalleryScreen(
     selectedSceneId: String,
     currentTab: Int,
     onTabSelect: (Int) -> Unit,
+    onMenuClick: () -> Unit,
     onSelectScene: (SpatialSceneItem) -> Unit,
     onAddNewPhoto: () -> Unit
 ) {
@@ -595,7 +695,7 @@ fun GalleryScreen(
                 }
             },
             navigationIcon = {
-                IconButton(onClick = { /* Menu */ }) {
+                IconButton(onClick = onMenuClick) {
                     Icon(
                         imageVector = Icons.Default.Menu,
                         contentDescription = "Menu",
@@ -900,34 +1000,6 @@ fun CustomSpatialSlider(
     )
 }
 
-@Composable
-private fun LookSlider(
-    label: String,
-    value: Float,
-    range: ClosedFloatingPointRange<Float>,
-    onChange: (Float) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "$label:",
-            color = Color.White,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.width(78.dp)
-        )
-        CustomSpatialSlider(
-            value = value,
-            onValueChange = onChange,
-            valueRange = range,
-            thinTrack = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-    }
-}
-
 /**
  * 3D Viewer & Studio Screen exactly replicating activity_image_view.xml from the Photos 3D sample app
  */
@@ -935,27 +1007,23 @@ private fun LookSlider(
 fun ViewerScreen(
     scene: SpatialSceneItem?,
     config: SpatialSceneConfig,
-    isFullscreen: Boolean,
-    activePanel: Int,
     isSensorEnabled: Boolean,
+    hasTiltSensor: Boolean = true,
     selectedBottomTab: Int,
     showControls: Boolean,
     onSelectBottomTab: (Int) -> Unit,
     onToggleControls: () -> Unit,
     onBackToGallery: () -> Unit,
-    onToggleFullscreen: () -> Unit,
     onToggleSensor: () -> Unit,
-    onTogglePanel: (Int) -> Unit,
-    onQuickInvert: () -> Unit,
     onSelectPattern: (String) -> Unit,
     onUpdateSpeed: (Float) -> Unit,
     onUpdateIntensity: (Float) -> Unit,
     onUpdateDepthCenter: (Float) -> Unit,
     onUpdateElasticity: (Float) -> Unit,
     onUpdateZoom: (Float) -> Unit,
+    onUpdateZoom3D: (Float) -> Unit,
     onUpdateInverted: (Boolean) -> Unit,
-    onUpdateConfig: ((SpatialSceneConfig) -> SpatialSceneConfig) -> Unit,
-    onReset: () -> Unit,
+    onDeleteOrReset: () -> Unit,
     onSetWallpaper: () -> Unit,
     onSave: () -> Unit,
     onShare: () -> Unit,
@@ -1043,11 +1111,11 @@ fun ViewerScreen(
                     }
                 }
 
-                // Delete / Trash Icon
-                IconButton(onClick = onReset) {
+                // Delete custom photo or reset parameters for preset scene
+                IconButton(onClick = onDeleteOrReset) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_delete_real),
-                        contentDescription = "Delete",
+                        contentDescription = if (scene?.isCustom == true) "Delete" else "Reset",
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
@@ -1209,6 +1277,33 @@ fun ViewerScreen(
                                     )
                                 }
 
+                                // Zoom 3D (depth-weighted zoom blend: 0.0 .. 1.0, Photos 3D 1.1.6)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_zoom_prop),
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Zoom 3D:",
+                                        color = Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    CustomSpatialSlider(
+                                        value = config.zoom3D,
+                                        onValueChange = onUpdateZoom3D,
+                                        valueRange = 0.0f..MotionLimits.MAX_ZOOM_3D,
+                                        modifier = Modifier.fillMaxWidth().testTag("viewer_zoom_3d")
+                                    )
+                                }
+
                             }
                         }
 
@@ -1364,15 +1459,17 @@ fun ViewerScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val tabs = listOf(
-                        Pair(R.drawable.ic_rotate_tab, "Rotate"),
-                        Pair(R.drawable.ic_shake_tab, "Shake"),
-                        Pair(R.drawable.ic_animations_tab, "Animations"),
-                        Pair(R.drawable.ic_zoom_pan_tab, "ZoomPan")
-                    )
+                    val tabs = buildList {
+                        if (hasTiltSensor) {
+                            add(Triple(0, R.drawable.ic_rotate_tab, "Rotate"))
+                        }
+                        add(Triple(1, R.drawable.ic_shake_tab, "Shake"))
+                        add(Triple(2, R.drawable.ic_animations_tab, "Animations"))
+                        add(Triple(3, R.drawable.ic_zoom_pan_tab, "ZoomPan"))
+                    }
 
-                    tabs.forEachIndexed { index, tab ->
-                        val isSelected = selectedBottomTab == index
+                    tabs.forEach { (tabIndex, iconRes, label) ->
+                        val isSelected = selectedBottomTab == tabIndex
                         Box(
                             modifier = Modifier
                                 .width(74.dp)
@@ -1380,8 +1477,8 @@ fun ViewerScreen(
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(if (isSelected) Color(0xFF45637A) else Color.Transparent)
                                 .clickable {
-                                    onSelectBottomTab(index)
-                                    when (index) {
+                                    onSelectBottomTab(tabIndex)
+                                    when (tabIndex) {
                                         0 -> {
                                             if (!isSensorEnabled) onToggleSensor()
                                             onSelectPattern("none")
@@ -1403,8 +1500,8 @@ fun ViewerScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                painter = painterResource(id = tab.first),
-                                contentDescription = tab.second,
+                                painter = painterResource(id = iconRes),
+                                contentDescription = label,
                                 tint = if (isSelected) Color.White else Color.White.copy(alpha = 0.75f),
                                 modifier = Modifier.size(26.dp)
                             )

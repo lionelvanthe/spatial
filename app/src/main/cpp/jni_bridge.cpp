@@ -42,10 +42,11 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeInitializeMesh(
     jint gridSize
 ) {
     auto* engine = fromHandle(handle);
-    if (!engine || !depthBytes) return nullptr;
+    if (!engine || !depthBytes || depthWidth <= 0 || depthHeight <= 0) return nullptr;
 
     jsize len = env->GetArrayLength(depthBytes);
-    if (len < depthWidth * depthHeight) return nullptr;
+    int64_t requiredBytes = static_cast<int64_t>(depthWidth) * static_cast<int64_t>(depthHeight);
+    if (requiredBytes <= 0 || static_cast<int64_t>(len) < requiredBytes) return nullptr;
 
     jbyte* ptr = env->GetByteArrayElements(depthBytes, nullptr);
     if (!ptr) return nullptr;
@@ -85,7 +86,8 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeCopyIndices(
     if (!dst) return;
 
     const int count = engine->getIndexCount();
-    if (count > 0) {
+    const jlong capacity = env->GetDirectBufferCapacity(indexBuffer);
+    if (count > 0 && capacity >= static_cast<jlong>(count)) {
         std::memcpy(dst, engine->getIndices(), static_cast<size_t>(count) * sizeof(uint16_t));
     }
 }
@@ -114,7 +116,7 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeSetProperties(
     );
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateRotate(
     JNIEnv* env,
     jobject /*thiz*/,
@@ -124,10 +126,11 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateRotate(
     jfloat tiltY
 ) {
     auto* engine = fromHandle(handle);
-    if (!engine || !vertexBuffer) return;
+    if (!engine || !vertexBuffer) return JNI_FALSE;
     auto* dst = static_cast<float*>(env->GetDirectBufferAddress(vertexBuffer));
-    if (!dst) return;
-    engine->updateRotate(dst, static_cast<float>(tiltX), static_cast<float>(tiltY));
+    const jlong needed = static_cast<jlong>(engine->getVertexCount()) * 5;
+    if (!dst || needed <= 0 || env->GetDirectBufferCapacity(vertexBuffer) < needed) return JNI_FALSE;
+    return engine->updateRotate(dst, static_cast<float>(tiltX), static_cast<float>(tiltY)) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -143,11 +146,12 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateShake(
     auto* engine = fromHandle(handle);
     if (!engine || !vertexBuffer) return;
     auto* dst = static_cast<float*>(env->GetDirectBufferAddress(vertexBuffer));
-    if (!dst) return;
+    const jlong needed = static_cast<jlong>(engine->getVertexCount()) * 5;
+    if (!dst || needed <= 0 || env->GetDirectBufferCapacity(vertexBuffer) < needed) return;
     engine->updateShake(dst, static_cast<float>(dt), static_cast<float>(tiltX), static_cast<float>(tiltY));
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateAnimated(
     JNIEnv* env,
     jobject /*thiz*/,
@@ -157,13 +161,14 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateAnimated(
     jint patternId
 ) {
     auto* engine = fromHandle(handle);
-    if (!engine || !vertexBuffer) return;
+    if (!engine || !vertexBuffer) return JNI_FALSE;
     auto* dst = static_cast<float*>(env->GetDirectBufferAddress(vertexBuffer));
-    if (!dst) return;
-    engine->updateAnimated(dst, static_cast<float>(progress), static_cast<int>(patternId));
+    const jlong needed = static_cast<jlong>(engine->getVertexCount()) * 5;
+    if (!dst || needed <= 0 || env->GetDirectBufferCapacity(vertexBuffer) < needed) return JNI_FALSE;
+    return engine->updateAnimated(dst, static_cast<float>(progress), static_cast<int>(patternId)) ? JNI_TRUE : JNI_FALSE;
 }
 
-JNIEXPORT void JNICALL
+JNIEXPORT jboolean JNICALL
 Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateZoomPan(
     JNIEnv* env,
     jobject /*thiz*/,
@@ -174,10 +179,11 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateZoomPan(
     jfloat panY
 ) {
     auto* engine = fromHandle(handle);
-    if (!engine || !vertexBuffer) return;
+    if (!engine || !vertexBuffer) return JNI_FALSE;
     auto* dst = static_cast<float*>(env->GetDirectBufferAddress(vertexBuffer));
-    if (!dst) return;
-    engine->updateZoomPan(dst, static_cast<float>(zoom), static_cast<float>(panX), static_cast<float>(panY));
+    const jlong needed = static_cast<jlong>(engine->getVertexCount()) * 5;
+    if (!dst || needed <= 0 || env->GetDirectBufferCapacity(vertexBuffer) < needed) return JNI_FALSE;
+    return engine->updateZoomPan(dst, static_cast<float>(zoom), static_cast<float>(panX), static_cast<float>(panY)) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL

@@ -20,6 +20,7 @@ import com.example.spatial.data.AssetDataLoader
 import com.example.spatial.data.MotionLimits
 import com.example.spatial.data.SpatialSceneConfig
 import com.example.spatial.data.SpatialSceneItem
+import com.example.spatial.gl.GifExporter
 import com.example.spatial.gl.VideoExporter
 import com.example.spatial.wallpaper.SpatialWallpaperService
 import kotlinx.coroutines.CancellationException
@@ -35,9 +36,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
+enum class ExportFormat {
+    MP4,
+    GIF
+}
+
 sealed interface ExportEvent {
     data class Saved(val location: String) : ExportEvent
-    data class Share(val uri: Uri) : ExportEvent
+    data class Share(val uri: Uri, val mimeType: String = "video/mp4") : ExportEvent
     data class Failed(val message: String) : ExportEvent
 }
 
@@ -113,19 +119,9 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                 }
                 _currentScene.value = fullItem
                 _currentConfig.value = fullItem.config
-                persistCurrentSceneForWallpaper(fullItem, fullItem.config)
             } finally {
                 if (request == sceneRequest) _isLoadingScene.value = false
             }
-        }
-    }
-
-    private fun persistConfigForWallpaper(config: SpatialSceneConfig) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val prefs = getApplication<Application>().getSharedPreferences("spatial_wallpaper_prefs", android.content.Context.MODE_PRIVATE)
-            prefs.edit()
-                .putString("wallpaper_config", config.toJson())
-                .apply()
         }
     }
 
@@ -167,52 +163,40 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun updateIntensity(intensity: Float) {
-        val newCfg = _currentConfig.value.copy(intensity = intensity).sanitized()
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = _currentConfig.value.copy(intensity = intensity).sanitized()
     }
 
     fun updateDepthCenter(depthCenter: Float) {
-        val newCfg = _currentConfig.value.copy(depthCenter = depthCenter)
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = _currentConfig.value.copy(depthCenter = depthCenter).sanitized()
     }
 
     fun updateSpeed(speed: Float) {
-        val newCfg = _currentConfig.value.copy(speed = speed)
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = _currentConfig.value.copy(speed = speed).sanitized()
     }
 
     fun updateElasticity(elasticity: Float) {
-        val newCfg = _currentConfig.value.copy(elasticity = elasticity).sanitized()
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = _currentConfig.value.copy(elasticity = elasticity).sanitized()
     }
 
     fun updateZoom(zoom: Float) {
-        val newCfg = _currentConfig.value.copy(zoom = zoom).sanitized()
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = _currentConfig.value.copy(zoom = zoom).sanitized()
+    }
+
+    fun updateZoom3D(zoom3D: Float) {
+        _currentConfig.value = _currentConfig.value.copy(zoom3D = zoom3D).sanitized()
     }
 
     fun updateInverted(rInverted: Boolean) {
-        val newCfg = _currentConfig.value.copy(rInverted = rInverted)
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = _currentConfig.value.copy(rInverted = rInverted).sanitized()
     }
 
     fun updatePattern(patternId: String) {
-        val newCfg = _currentConfig.value.copy(patternId = patternId)
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = _currentConfig.value.copy(patternId = patternId).sanitized()
     }
 
     /** Applies [change] to the current config; used by the look (effects) sliders. */
     fun updateConfig(change: (SpatialSceneConfig) -> SpatialSceneConfig) {
-        val newCfg = change(_currentConfig.value).sanitized()
-        _currentConfig.value = newCfg
-        persistConfigForWallpaper(newCfg)
+        _currentConfig.value = change(_currentConfig.value).sanitized()
     }
 
     fun toggleSensor() {
@@ -222,7 +206,20 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
     fun resetToDefault() {
         val scene = _currentScene.value ?: return
         _currentConfig.value = scene.config
-        persistConfigForWallpaper(scene.config)
+    }
+
+    fun deleteCustomScene(sceneId: String): Boolean {
+        val target = _scenes.value.firstOrNull { it.id == sceneId && it.isCustom } ?: return false
+        _scenes.value = _scenes.value.filterNot { it.id == sceneId }
+        if (_currentScene.value?.id == sceneId) {
+            val fallback = _scenes.value.firstOrNull()
+            if (fallback != null) {
+                selectScene(fallback)
+            } else {
+                _currentScene.value = null
+            }
+        }
+        return true
     }
 
     fun processCustomImage(uri: Uri) {
@@ -247,10 +244,12 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                 // Scale down if huge for fast processing
                 val maxDim = 1280
                 val scaledBmp = if (bitmap.width > maxDim || bitmap.height > maxDim) {
-                    val ratio = bitmap.width.toFloat() / bitmap.height.toFloat()
-                    val targetW = if (ratio > 1) maxDim else (maxDim * ratio).toInt()
-                    val targetH = if (ratio > 1) (maxDim / ratio).toInt() else maxDim
-                    Bitmap.createScaledBitmap(bitmap, targetW, targetH, true)
+                    val ratio = bitmap.width.toFloat() / bitmap.height.coerceAtLeast(1).toFloat()
+                    val targetW = (if (ratio > 1f) maxDim else (maxDim * ratio).toInt()).coerceAtLeast(1)
+                    val targetH = (if (ratio > 1f) (maxDim / ratio).toInt() else maxDim).coerceAtLeast(1)
+                    Bitmap.createScaledBitmap(bitmap, targetW, targetH, true).also {
+                        if (it !== bitmap) bitmap.recycle()
+                    }
                 } else {
                     bitmap
                 }
@@ -258,6 +257,7 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                 val depthBytes = depthManager.estimateDepth(scaledBmp) { prog ->
                     _processProgress.value = prog
                 }
+                val autoDepthCenter = com.example.spatial.ai.DepthPreprocess.estimateDepthCenter(depthBytes, 504, 504)
 
                 val customItem = SpatialSceneItem(
                     id = "custom_${System.currentTimeMillis()}",
@@ -266,12 +266,12 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                     isCustom = true,
                     customImageUri = uri.toString(),
                     config = SpatialSceneConfig(
-                        intensity = MotionLimits.DEFAULT_INTENSITY,
-                        depthCenter = 0.65f,
+                        intensity = 0.82f,
+                        depthCenter = autoDepthCenter,
                         speed = 0.65f,
                         zoom = 0.0f,
                         zoom3D = 0.0f,
-                        patternId = "none"
+                        patternId = "horizontal"
                     ),
                     thumbnailBitmap = squareThumbnail(scaledBmp, 200),
                     fullImageBitmap = scaledBmp,
@@ -281,7 +281,6 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                 _scenes.value = listOf(customItem) + _scenes.value
                 _currentScene.value = customItem
                 _currentConfig.value = customItem.config
-                persistCurrentSceneForWallpaper(customItem, customItem.config)
 
             } catch (e: Exception) {
                 Log.e("SpatialViewModel", "Failed processing custom image", e)
@@ -294,15 +293,24 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
 
     /** Centre-crops to a square before scaling, so the gallery thumbnail is never stretched. */
     private fun squareThumbnail(src: Bitmap, size: Int): Bitmap {
-        val side = minOf(src.width, src.height)
+        val side = minOf(src.width, src.height).coerceAtLeast(1)
         val x = (src.width - side) / 2
         val y = (src.height - side) / 2
         val square = Bitmap.createBitmap(src, x, y, side, side)
-        return Bitmap.createScaledBitmap(square, size, size, true)
+        return try {
+            Bitmap.createScaledBitmap(square, size, size, true)
+        } finally {
+            if (square !== src) square.recycle()
+        }
     }
 
     /** Renders the current scene's animation to an MP4, then saves it to the gallery or shares it. */
-    fun exportVideo(share: Boolean) {
+    fun exportVideo(share: Boolean) = exportMedia(ExportFormat.MP4, share)
+
+    /** Renders the current scene's animation to a looping GIF, then saves it or shares it. */
+    fun exportGif(share: Boolean) = exportMedia(ExportFormat.GIF, share)
+
+    fun exportMedia(format: ExportFormat, share: Boolean) {
         if (_isExporting.value) return
         val scene = _currentScene.value
         val image = scene?.fullImageBitmap
@@ -315,23 +323,38 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
         _exportProgress.value = 0f
         exportJob = viewModelScope.launch {
             val app = getApplication<Application>()
-            val file = File(app.cacheDir, "exports/spatial_${System.currentTimeMillis()}.mp4")
+            val ext = if (format == ExportFormat.GIF) "gif" else "mp4"
+            val mime = if (format == ExportFormat.GIF) "image/gif" else "video/mp4"
+            val file = File(app.cacheDir, "exports/spatial_${System.currentTimeMillis()}.$ext")
             try {
                 withContext(Dispatchers.IO) { clearOldExports(File(app.cacheDir, "exports")) }
-                VideoExporter().export(
-                    image, scene.depthData, scene.depthWidth, scene.depthHeight, config, file
-                ) { _exportProgress.value = it }
+                when (format) {
+                    ExportFormat.MP4 -> VideoExporter().export(
+                        image, scene.depthData, scene.depthWidth, scene.depthHeight, config, file
+                    ) { _exportProgress.value = it }
+                    ExportFormat.GIF -> GifExporter().export(
+                        image, scene.depthData, scene.depthWidth, scene.depthHeight, config, file
+                    ) { _exportProgress.value = it }
+                }
                 if (share) {
                     val uri = FileProvider.getUriForFile(app, "${app.packageName}.fileprovider", file)
-                    _exportEvents.tryEmit(ExportEvent.Share(uri))
+                    _exportEvents.tryEmit(ExportEvent.Share(uri, mime))
                 } else {
-                    val where = withContext(Dispatchers.IO) { saveToGallery(file) }
+                    val where = withContext(Dispatchers.IO) {
+                        val saved = if (format == ExportFormat.GIF) {
+                            saveGifToGallery(file)
+                        } else {
+                            saveToGallery(file)
+                        }
+                        file.delete()
+                        saved
+                    }
                     _exportEvents.tryEmit(ExportEvent.Saved(where))
                 }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                Log.e("SpatialViewModel", "Video export failed", e)
+                Log.e("SpatialViewModel", "Export ($format) failed", e)
                 _exportEvents.tryEmit(ExportEvent.Failed(e.message ?: "Export failed"))
             } finally {
                 _isExporting.value = false
@@ -382,7 +405,44 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
         return target.absolutePath
     }
 
+    /** Copies [file] into the gallery (Pictures/Spatial) as an animated GIF. */
+    private fun saveGifToGallery(file: File): String {
+        val app = getApplication<Application>()
+        val name = file.name
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/gif")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/Spatial")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val resolver = app.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: error("Could not create gallery entry")
+            try {
+                resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+                    ?: error("Could not open gallery entry")
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                throw e
+            }
+            return "Pictures/Spatial/$name"
+        }
+        val dir = app.getExternalFilesDir(Environment.DIRECTORY_PICTURES) ?: error("No storage available")
+        dir.mkdirs()
+        val target = File(dir, name)
+        file.copyTo(target, overwrite = true)
+        return target.absolutePath
+    }
+
     fun launchSetLiveWallpaperIntent() {
+        val current = _currentScene.value
+        if (current != null) {
+            persistCurrentSceneForWallpaper(current, _currentConfig.value)
+        }
         val app = getApplication<Application>()
         try {
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {

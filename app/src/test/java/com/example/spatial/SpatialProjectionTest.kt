@@ -26,7 +26,8 @@ class SpatialProjectionTest {
             "eight_vertical" to 13,
             "spiral_cw" to 14,
             "horizontal_rapid" to 15,
-            "vertical_rapid" to 16
+            "vertical_rapid" to 16,
+            "zoom" to 17
         )
         for ((id, nativeId) in expected) {
             assertEquals("Pattern $id", nativeId, MotionPattern.patternIdToNativeInt(id))

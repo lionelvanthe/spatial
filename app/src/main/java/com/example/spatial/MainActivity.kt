@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.core.content.IntentCompat
 import com.example.spatial.ui.MainScreen
 import com.example.spatial.ui.SpatialViewModel
 import com.example.spatial.ui.theme.SpatialTheme
@@ -21,7 +22,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        importImageFromIntent(intent)
+        if (savedInstanceState == null) {
+            importImageFromIntent(intent)
+        }
         enableEdgeToEdge()
         setContent {
             SpatialTheme {
@@ -43,7 +46,7 @@ class MainActivity : ComponentActivity() {
 
     private fun importImageFromIntent(intent: Intent?) {
         val image: Uri? = when (intent?.action) {
-            Intent.ACTION_SEND -> intent.getParcelableExtra(Intent.EXTRA_STREAM)
+            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             Intent.ACTION_VIEW -> intent.data
             else -> null
         }

@@ -157,6 +157,7 @@ object MotionPattern {
         "spiral_cw" -> 14
         "horizontal_rapid" -> 15
         "vertical_rapid" -> 16
+        "zoom" -> 17
         else -> 0
     }
 

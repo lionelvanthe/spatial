@@ -83,8 +83,38 @@ object AssetDataLoader {
     }
 
     fun loadPresetSceneById(context: Context, id: String): SpatialSceneItem? {
-        val preset = loadAllPresetScenes(context).firstOrNull { it.id.equals(id, ignoreCase = true) }
-        return preset?.let { loadSceneFullData(context, it) }
+        val entry = PRESET_SCENE_IDS.firstOrNull { it.first.equals(id, ignoreCase = true) }
+            ?: return null
+        val (sceneId, title) = entry
+        var folder = "wallpapers/$sceneId"
+        var descStream: InputStream? = null
+        try {
+            descStream = context.assets.open("$folder/${sceneId}_desc.dat")
+        } catch (_: Exception) {
+            folder = "samples/$sceneId"
+            try {
+                descStream = context.assets.open("$folder/${sceneId}_desc.dat")
+            } catch (_: Exception) {
+                Log.w(TAG, "Could not open desc for $sceneId")
+            }
+        }
+        var config = SpatialSceneConfig()
+        if (descStream != null) {
+            try {
+                val jsonStr = descStream.bufferedReader().use { it.readText() }
+                config = SpatialSceneConfig.fromJson(jsonStr)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing config for $sceneId", e)
+            }
+        }
+        val item = SpatialSceneItem(
+            id = sceneId,
+            title = title,
+            folderPath = folder,
+            isCustom = false,
+            config = config
+        )
+        return loadSceneFullData(context, item)
     }
 
     fun loadSceneFullData(context: Context, item: SpatialSceneItem): SpatialSceneItem {

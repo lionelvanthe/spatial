@@ -49,12 +49,18 @@ object ShaderHelper {
         val program = GLES20.glCreateProgram()
         if (program == 0) {
             Log.e(TAG, "Could not create GL program")
+            GLES20.glDeleteShader(vertexShader)
+            GLES20.glDeleteShader(fragmentShader)
             return 0
         }
 
         GLES20.glAttachShader(program, vertexShader)
         GLES20.glAttachShader(program, fragmentShader)
         GLES20.glLinkProgram(program)
+        GLES20.glDetachShader(program, vertexShader)
+        GLES20.glDetachShader(program, fragmentShader)
+        GLES20.glDeleteShader(vertexShader)
+        GLES20.glDeleteShader(fragmentShader)
 
         val linkStatus = IntArray(1)
         GLES20.glGetProgramiv(program, GLES20.GL_LINK_STATUS, linkStatus, 0)

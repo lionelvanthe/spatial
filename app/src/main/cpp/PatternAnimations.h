@@ -19,7 +19,8 @@ enum class PatternId : int {
     EIGHT_VERTICAL = 13,
     SPIRAL_CW = 14,
     HORIZONTAL_RAPID = 15,
-    VERTICAL_RAPID = 16
+    VERTICAL_RAPID = 16,
+    ZOOM = 17
 };
 
 class PatternAnimations {

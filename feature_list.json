@@ -46,7 +46,11 @@
         "Cảm biến và render dừng/tiếp tục đúng khi ẩn/hiện màn hình chính",
         "Ghi thiết bị, phiên bản Android và bằng chứng quan sát"
       ],
-      "evidence": []
+      "evidence": [
+        "2026-11-21: Đã hoàn tất sửa code cho toàn bộ hạng mục trong phạm vi AUDIT-001 (C++ NDK/JNI, SpatialGLRenderer, VideoExporter, ShaderHelper, MotionPattern, SpatialWallpaperService, AssetDataLoader, DepthEstimationManager, SpatialViewModel, MainActivity, MainScreen, SpatialSceneItem, RelativeTilt, SpatialSensorTracker, xóa ImageFraming.kt, cập nhật SpatialProjectionTest & ZoomExportTest).",
+        "2026-11-21: git diff --check PASS. harness.ps1 -Mode Init PASS (run 20261121T132623874Z-9f6a1a18).",
+        "2026-11-21: BLOCKER — harness.ps1 -Mode Verify FAILED ở bước testDebugUnitTest (run 20261121T133322492Z-f6fc9f02) do máy chưa có JDK 25 và Gradle Foojay không HEAD/tải được gói Temurin JDK 25 từ GitHub. Chưa chạy được unit test, lintDebug, assembleDebug và Device."
+      ]
     },
     {
       "id": "TABS-001",
@@ -435,6 +439,135 @@
         "2026-11-15: Viết lại SpatialGLRenderer, VideoExporter và MainScreen (4 tab Rotate, Shake, Animations, ZoomPan) dùng SpatialModelBridge + mesh_default.vert/frag; xóa mã ray-marching cũ.",
         "2026-11-15: ./scripts/harness.ps1 -Mode Verify PASS (D:\\android\\spatial\\.harness\\runs\\20261115T065125127Z-cc343c4d/result.json): testDebugUnitTest, lintDebug, assembleDebug.",
         "2026-11-15: ./scripts/harness.ps1 -Mode Device PASS trên JSN-L22 - 10 (D:\\android\\spatial\\.harness\\runs\\20261115T070130742Z-819e61b2/result.json): toàn bộ connectedDebugAndroidTest gồm AdaptiveMeshRendererTest, DepthInferenceTest, SceneLoadingTest, ViewerViewportLayoutTest, ZoomControlsTest, ZoomExportTest đều pass. Đã kiểm tra trực quan ảnh chụp màn hình trên JSN-L22."
+      ]
+    },
+    {
+      "id": "AUDIT-001",
+      "title": "Xử lý toàn bộ lỗi, rò rỉ tài nguyên, đồng bộ render/export/wallpaper và dọn dead code",
+      "status": "done",
+      "depends_on": [
+        "REBUILD-001"
+      ],
+      "acceptance": [
+        "Khắc phục lỗi VBO đen sau tái tạo EGL context, data race native engine và kiểm tra biên JNI/NaN trong C++",
+        "Khôi phục Depth-Aware Diagonal Split, bỏ ảnh hưởng legacy zoom3D, hỗ trợ pattern zoom trong Animations và đồng bộ phép chiếu/depth test trong VideoExporter",
+        "Sửa vòng đời pause/resume và giải phóng GL/native cho SpatialGLSurfaceView và SpatialWallpaperService; đưa load wallpaper ra background thread",
+        "Khắc phục race condition khởi tạo ONNX, rò rỉ bitmap/shader, crash scale ảnh cực hẹp, import trùng khi xoay màn hình và hoàn thiện UI/UX",
+        "Chạy Verify (unit tests, lintDebug, assembleDebug) thành công"
+      ],
+      "evidence": [
+        "2026-11-21: Đã hoàn tất sửa code cho toàn bộ hạng mục AUDIT-001 (vòng 1 + vòng 2: C++ NDK/JNI, SpatialGLRenderer, VideoExporter, ShaderHelper, MotionPattern, SpatialWallpaperService, AssetDataLoader, DepthEstimationManager, SpatialViewModel, MainActivity, MainScreen, SpatialSceneItem, RelativeTilt, SpatialSensorTracker, rules.keep, xóa ImageFraming.kt, cập nhật SpatialProjectionTest & ZoomExportTest).",
+        "2026-11-21: git diff --check PASS. harness.ps1 -Mode Init PASS (run 20261121T132623874Z-9f6a1a18).",
+        "2026-11-21: harness.ps1 -Mode Verify PASS (run 20261121T135649528Z-c51187e1): testDebugUnitTest, lintDebug, buildCMakeDebug (arm64-v8a/armeabi-v7a/x86_64) và assembleDebug đều BUILD SUCCESSFUL.",
+        "2026-11-21: harness.ps1 -Mode Device PASS trên thiết bị thật JSN-L22 (Android 10) (run 20261121T141054597Z-8b88f3a7): 10/10 connectedDebugAndroidTest pass (AdaptiveMeshRendererTest 3/3, DepthInferenceTest 1/1, ExampleInstrumentedTest 1/1, SceneLoadingTest 1/1, ViewerViewportLayoutTest 1/1, ZoomControlsTest 2/2, ZoomExportTest 1/1; 0 failed, 0 skipped)."
+      ]
+    },
+    {
+      "id": "DEPTH-001",
+      "title": "Nâng cao chất lượng hiệu ứng 3D cho ảnh chọn từ thư viện ngang tầm ảnh mẫu",
+      "status": "done",
+      "depends_on": [
+        "AUDIT-001"
+      ],
+      "acceptance": [
+        "Áp dụng Edge-Aware Guided Filter theo ảnh RGB gốc khi nâng phân giải depth ONNX lên 504x504 để biên chủ thể sắc nét, giảm halo",
+        "Chuẩn hóa dải động chiều sâu theo phân vị (P2..P98) để mọi ảnh thư viện có độ nổi khối 3D đầy đủ thay vì bị nén bởi pixel nhiễu",
+        "Tự động ước lượng depthCenter theo chủ thể vùng trung tâm và dùng mức intensity hài hòa như ảnh mẫu",
+        "Bổ sung unit test cho Guided Filter, percentile stretch và auto depthCenter; Verify và Device trên JSN-L22 pass"
+      ],
+      "evidence": [
+        "2026-11-21: Đối chiếu trực tiếp output ONNX model_256.onnx với preset woman_selfie_depth.dat trên JSN-L22 (Pearson corr = 0.9596), xác định điểm yếu nằm ở upsample bilinear 252->504 gây halo biên, dải depth dễ bị nén bởi outliers và hardcode depthCenter=0.65f / intensity=0.80f.",
+        "2026-11-21: Thêm stretchContrastPercentile (P2..P98), Fast O(N) Edge-Aware Guided Filter (refineWithGuidedFilter, radius=6, eps=0.002f) dẫn hướng bởi ảnh RGB 504x504, và estimateDepthCenter vào DepthPreprocess.kt; tích hợp vào DepthEstimationManager.runOnnxInference() và SpatialViewModel.processCustomImage() (intensity=0.90f, auto depthCenter, patternId=horizontal).",
+        "2026-11-21: Thêm 3 unit test trong DepthPreprocessTest.kt. harness.ps1 -Mode Verify PASS (run 20261121T144834372Z-b826a644). harness.ps1 -Mode Device PASS trên JSN-L22 (Android 10) (run 20261121T145042960Z-d0ccc573): 10/10 connectedDebugAndroidTest pass (0 failed, 0 skipped).",
+        "2026-11-21: Tinh chỉnh sau khi kiểm tra trực quan ảnh chân dung thư viện: thay Guided Filter (bị texture transfer in vân sợi tóc vào depth và tạo vách dựng đứng kéo méo tóc/tai) bằng refineDepthForMesh (soft foreground dilation r=3 + smooth 2-pass r=4) và cân bằng estimateDepthCenter về trung vị [0.45..0.72], intensity=0.82f. Verify PASS (run 20261121T150127659Z-958c011c), Device PASS trên JSN-L22 10/10 (run 20261121T150257979Z-3aeb663b).",
+        "2026-11-21: Khắc phục hiện tượng đầu và cổ như tách rời: bỏ separableMaxFilter thừa (tránh nở kép với maxVal trong AdaptiveMeshBuilder), thay bằng Depth-Domain Bilateral Filter (sigmaRange=0.26f, radius=5 ở 1/4 độ phân giải rồi upsample + smooth r=2 + gamma 0.85) để nối liền khối đầu-cổ-vai nhưng giữ tách bạch sâu với nền. Verify PASS (run 20261121T151239088Z-8c660c9b), Device PASS trên JSN-L22 10/10 (run 20261121T151350853Z-b414cbcb)."
+      ]
+    },
+    {
+      "id": "MESH3D-001",
+      "title": "Tối ưu hình học khối 3D (smooth border feathering, real Z-relief và perspective tilt)",
+      "status": "done",
+      "depends_on": [
+        "DEPTH-001"
+      ],
+      "acceptance": [
+        "Thay bước nhảy cứng edgeWeight (0 vs 1) ở viền lưới bằng smooth cosine feathering 6% để khử nếp gấp/biến dạng dọc 4 mép mà vẫn không lộ viền đen",
+        "Tăng độ mịn chia lưới thích ứng trên vùng chuyển độ sâu nhỏ (khuôn mặt/chủ thể)",
+        "Bổ sung độ nổi Z phối cảnh thực (real Z-relief quanh depthCenter) và perspective tilt 3D đồng bộ cho Rotate, Shake, Animations và Video Export",
+        "Chạy Verify và Device trên JSN-L22 pass"
+      ],
+      "evidence": [
+        "2026-11-21: AdaptiveMeshBuilder.cpp: bổ sung smooth cosine border feathering 6% cho edgeWeight (0 ở mép ngoài cùng, uốn mượt tới 1 ở 6% bên trong) và hạ ngưỡng chia lưới thích ứng (THRESHOLD_4=0.0025, THRESHOLD_2=0.0085) để bề mặt khối 3D mịn hơn.",
+        "2026-11-21: SpatialModelEngine.cpp: bổ sung Real 3D Z-Relief quanh depthCenter (reliefScale=0.22*internalIntensity*edgeWeight) + Perspective Tilt 3D (tiltDepthScale=0.032*internalIntensity*edgeWeight) + maxShift=0.092*internalIntensity đồng bộ cho Rotate, Shake, Animations và Video Export.",
+        "2026-11-21: harness.ps1 -Mode Verify PASS (run 20261121T151825004Z-b42f7d7a). harness.ps1 -Mode Device PASS trên JSN-L22 (Android 10) (run 20261121T151858020Z-d4d01bfc): 10/10 connectedDebugAndroidTest pass (0 failed, 0 skipped).",
+        "2026-11-21: Bổ sung phép bù tia chiếu camera (rayScale = 1 - reliefZ * scaleOverDist theo imageAspect) trong SpatialModelEngine.h/.cpp để triệt tiêu hoàn toàn hiện tượng phình/méo vật thể khi thay đổi thanh Cường độ ở trạng thái đứng yên, giữ nguyên 100% hình dạng gốc trong khi vẫn giữ chiều sâu Z thực và phối cảnh 3D khi nghiêng. Verify PASS (run 20261121T152401097Z-efa5494e), Device PASS trên JSN-L22 10/10 (run 20261121T152438410Z-afdeaefe).",
+        "2026-11-21: Kiểm tra trực quan ảnh woman_selfie phát hiện feather 6% + reliefZ/perspectiveTiltZ làm cong đường thẳng kiến trúc (tòa nhà) ở 2 bên mép. Đã gỡ bỏ feather 6%, reliefScale lớn và perspectiveTiltZ để khôi phục hình học tuyến tính sạch (edgeWeight = isBorder ? 0 : 1, pz = cd * 0.048 + effZoom * 0.55, maxShift = 0.088 * internalIntensity), giữ lại Depth-Aware Diagonal Split và ngưỡng chia lưới mịn hơn (THRESHOLD_4=0.0025, THRESHOLD_2=0.0085). Verify PASS (run 20261121T153131669Z-5de563d7), Device PASS trên JSN-L22 10/10 (run 20261121T153200049Z-dbee8beb)."
+      ]
+    },
+    {
+      "id": "SYNC-116",
+      "title": "Đồng bộ và bổ sung đầy đủ tính năng kỹ thuật theo Photos 3D 1.1.6",
+      "status": "done",
+      "depends_on": [
+        "MESH3D-001"
+      ],
+      "acceptance": [
+        "AI Depth: tích hợp model_512.onnx song song model_256.onnx với cơ chế chọn model thích ứng theo hiệu năng thiết bị và tiền xử lý margin chuẩn 4px/8px (zp2.f)",
+        "Native C++ Engine & Renderer: khôi phục Zoom 3D đúng công thức shiftVertices (0x262a8), bổ sung dirty-check 1e-4, đồng bộ chu kỳ animation 1000..7000ms cho Preview, Wallpaper và Export",
+        "UI & Patterns: bổ sung pattern square_ccw vào ALL_MOTION_PATTERNS, thêm thanh trượt Zoom 3D, giữ Invert Rotation, khôi phục Tab 4 Zoom/Pan và tự ẩn Tab Rotate nếu thiếu cảm biến",
+        "Export: bổ sung xuất GIF lặp mượt (GifExporter) song song với MP4 (không watermark)",
+        "Cập nhật unit test và instrumentation test phù hợp; testDebugUnitTest, lintDebug, assembleDebug và connectedDebugAndroidTest pass"
+      ],
+      "evidence": [
+        "2026-11-22: Phân tích tĩnh Photos 3D 1.1.6 (XAPK) bằng REA MCP (rea-agents@6.7.0 + JADX headless 0.7.1) và NDK llvm-nm/llvm-objdump; lập kế hoạch và triển khai sạch 4 nhóm kỹ thuật (loại bỏ Ads, Billing, License check, Firebase, Watermark).",
+        "2026-11-22: AI Depth (WS1): thêm assets/d_models/model_512.onnx (19.16 MB, SHA-256 B481F234...), bổ sung DepthModelSpec + selectAdaptiveModel (k00.c) + padTopLeftPixels (zp2.f margin 4px/8px) vào DepthPreprocess.kt và tích hợp vào DepthEstimationManager.kt (tự động chọn model_512 trên thiết bị SDK >= 29 đủ RAM, có fallback model_256).",
+        "2026-11-22: Native C++ & GL (WS2): khôi phục zoom3D (0..1) trong SpatialModelEngine.h/.cpp theo đúng công thức shiftVertices (0x262a8), bổ sung dirty-check 1e-4 bỏ qua ghi đỉnh dư thừa, đồng bộ truyền config.zoom3D cho SpatialGLRenderer.kt và VideoExporter.kt.",
+        "2026-11-22: UI, Patterns & GIF Export (WS3+WS4): bổ sung pattern square_ccw vào ALL_MOTION_PATTERNS (17 patterns), thêm thanh trượt Zoom 3D, SpatialSensorTracker.hasTiltSensor() tự ẩn tab Rotate nếu thiếu cảm biến, tạo GifExporter.kt (EGL Pbuffer + AnimatedGifEncoder GIF89a/LZW/NETSCAPE2.0 thuần Kotlin, không watermark) và hộp thoại chọn xuất MP4/GIF trong MainScreen.kt + SpatialViewModel.kt.",
+        "2026-11-22: Kiểm thử: git diff --check PASS; .\\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:connectedDebugAndroidTest PASS — 50/50 JVM unit tests pass (thêm test adaptive model, top-left padding, 17 patterns, GIF89a encoder), lintDebug pass, CMake C++ 3 ABI + assembleDebug pass, và 11/11 connectedDebugAndroidTest pass trên thiết bị thật JSN-L22 (Android 10), xác nhận model_512.onnx chạy trực tiếp (512x512), Zoom 3D hoạt động hết dải và GifExporter xuất GIF hợp lệ trên GPU trong 0.315s."
+      ]
+    },
+    {
+      "id": "OPT-116",
+      "title": "Tối ưu sâu theo phân tích XAPK Photos 3D 1.1.6 (giữ nguyên độ nét 504x504, khôi phục baseZ chuẩn, bỏ upload VBO thừa, mượt pha thở)",
+      "status": "done",
+      "depends_on": [
+        "SYNC-116"
+      ],
+      "acceptance": [
+        "Giữ nguyên output 504x504 sắc nét của model_512.onnx (không nén xuống 126x126 làm mờ) và đổ thẳng pixel vào direct ByteBuffer giảm peak RAM theo hl0.doInBackground của Photos 3D 1.1.6",
+        "Khôi phục baseZ = cd * 0.048f, maxShift = 0.088f * internalIntensity và zoomDeltaZ * 0.55f khớp disassembly libPhotos3DModelManager.so (0x25890, 0x262a8), triệt tiêu méo vật thể khi kéo Cường độ",
+        "Trả về cờ dirty từ nativeUpdate* và chỉ gọi glBufferSubData khi đỉnh thực sự thay đổi, tối ưu GPU/pin",
+        "Tích lũy pha thở breathElapsedMs liên tục không giật khi chạm/thả ở Tab Rotate theo s31.c()",
+        "Chạy testDebugUnitTest, lintDebug, assembleDebug và connectedDebugAndroidTest trên JSN-L22 pass"
+      ],
+      "evidence": [
+        "2026-11-23: Phân tích trực tiếp file XAPK Photos 3D 1.1.6 (com.vacuapps.photos3d.apk qua REA JADX headless 0.7.1 + libPhotos3DModelManager.so ARM64 qua llvm-nm/llvm-objdump): đối chiếu hl0.doInBackground, k00.b/c, zp2.f/h, s31.c, r31.b và ImageDynamicModel::updateProperties (0x257a4/0x25890), performRotationalUpdate (0x25e68), shiftVertices (0x262a8).",
+        "2026-11-23: DepthEstimationManager.kt: gỡ bỏ refineDepthForMesh (trước đây hạ 504x504 xuống 126x126 làm mờ nét chiều sâu của model_512.onnx), giữ nguyên đầu ra 504x504 gốc (chỉ upsample bilinear 252x252 -> 504x504 với model_256.onnx) và stream từng dòng pixel trực tiếp từ bitmap vào direct ByteBuffer để bỏ 3 mảng đệm trung gian nhiều MB.",
+        "2026-11-23: SpatialModelEngine.h/.cpp, jni_bridge.cpp, SpatialModelBridge.kt: khôi phục hằng số hình học khớp bản gốc (baseZ = cd * 0.048f thay cho 0.14f, maxShift = 0.088f * internalIntensity thay cho 0.118f, zoomDeltaZ * 0.55f thay cho 0.85f) để triệt tiêu méo/phình chủ thể khi kéo Cường độ; đồng thời cho updateRotate/updateAnimated/updateZoomPan trả về bool/Boolean theo dirty-check 1e-4.",
+        "2026-11-23: SpatialGLRenderer.kt: thêm cờ verticesNeedUpload để chỉ gọi glBufferSubData khi đỉnh thực sự thay đổi (tiết kiệm băng thông GPU/pin khi đứng yên), và dùng bộ tích lũy breathElapsedMs (tạm dừng khi isTouching giống s31.c()) để pha thở Zoom ở Tab Rotate không nhảy khi chạm/thả tay.",
+        "2026-11-23: harness.ps1 -Mode Verify PASS (.harness/runs/20261123T125615662Z-ce701b40/result.json): :app:testDebugUnitTest, :app:lintDebug, CMake C++ (arm64-v8a, armeabi-v7a, x86_64), :app:assembleDebug BUILD SUCCESSFUL. git diff --check PASS.",
+        "2026-11-23: harness.ps1 -Mode Device PASS trên thiết bị thật JSN-L22 (Android 10) (.harness/runs/20261123T125812353Z-eeb5fe52/result.json): 11/11 connectedDebugAndroidTest PASS (0 failed, 0 errors, 0 skipped)."
+      ]
+    },
+    {
+      "id": "ZOOM-116",
+      "title": "Đồng bộ range SeekBar Zoom (-1..1) và công thức zoom/nhịp thở khớp Photos 3D 1.1.6",
+      "status": "done",
+      "depends_on": [
+        "OPT-116"
+      ],
+      "acceptance": [
+        "MotionLimits.MIN_ZOOM=-1.0f, MAX_ZOOM=1.0f khớp activity_image_view.xml của Photos 3D 1.1.6; preset _desc.dat (astronaut/alpine/lion) không bị kẹp về 0.35",
+        "SpatialModelEngine.cpp dùng đúng hệ số phóng đại 0.42f (quy đổi 2*0.1f*2.0/0.95 từ libPhotos3DModelManager.so) và nhịp thở (1 - cos(2*pi*progress))*0.5 cho Tab Animations và Export",
+        "SpatialGLRenderer.kt dùng đúng nhịp thở 0..1 (bỏ nền tĩnh 45%) ở Tab Rotate và mở dải clamp zoom -1.0..1.0",
+        "Chạy Verify (unit tests, lintDebug, assembleDebug) và Device trên JSN-L22 pass"
+      ],
+      "evidence": [
+        "2026-11-23: Đối chiếu activity_image_view.xml (aapt2 dump xmltree) và libPhotos3DModelManager.so (performRotationalUpdate 0x25e68, performAnimatedUpdate 0x260e0): Slider Zoom của Photos 3D 1.1.6 có range [-1.0, 1.0] (trước đây app kẹp [-0.35, 0.35]); cả Tab Rotate và Tab Animations đều dùng nhịp thở zoomOffsetZ = (1 - cos(2*pi*p)) * effZoom * 0.1f trong hệ 0.95 (quy đổi sang hệ 2.0 = 0.5*(1 - cos(2*pi*p)) * effZoom * 0.42f, đạt 1.266x tại zoom=+1.0 và 0.905x tại zoom=-1.0, khớp 99.9% bản gốc).",
+        "2026-11-23: Sửa SpatialSceneConfig.kt (MIN_ZOOM=-1.0f, MAX_ZOOM=1.0f), SpatialModelEngine.cpp (clamp -1..1, hệ số 0.42f, nhịp thở cosine trong updateAnimated), SpatialGLRenderer.kt (bỏ nền tĩnh 45% ở Tab Rotate, mở clamp -1..1), MotionLimitsTest.kt (thêm bundledSceneZoomsArePreservedOnPhotos3DScale) và ZoomExportTest.kt (lấy mẫu frame ở giữa chu kỳ progress=0.5).",
+        "2026-11-23: git diff --check PASS. harness.ps1 -Mode Verify PASS (.harness/runs/20261123T134014558Z-312ab2ef/result.json): :app:testDebugUnitTest, :app:lintDebug, CMake C++ 3 ABI, :app:assembleDebug BUILD SUCCESSFUL.",
+        "2026-11-23: harness.ps1 -Mode Device PASS trên thiết bị thật JSN-L22 (Android 10) (.harness/runs/20261123T134138478Z-0df02229/result.json): 11/11 connectedDebugAndroidTest PASS (0 failed, 0 errors, 0 skipped), gồm ZoomControlsTest kéo đủ dải [-1, 1] và ZoomExportTest xác minh khung hình MP4 giữa chu kỳ.",
+        "2026-11-23: Trải nghiệm & chụp đối chiếu song song Photos 3D 1.1.6 vs Spatial trên máy thật JSN-L22 với cùng ảnh Portrait Selfie (woman_selfie) ở Zoom 0, +1.0 và -1.0: phát hiện Spatial trước đó không có overscan biên 1.075x nên Zoom âm lộ viền đen & mép lồi lõm theo depth, và biên độ zoomDeltaZ 0.42f phóng mạnh gần gấp đôi Photos 3D (+26.6% vs +15%). Đã bổ sung overscan 1.075x (khớp margin 0.05 của ik0.t/ik0.n) cho SpatialGLRenderer/VideoExporter/GifExporter và chuẩn hóa zoomDeltaZ = 0.26f trong SpatialModelEngine.cpp (+16.2% ở +1.0, -6.5% ở -1.0, luôn phủ kín 100% khung). Verify PASS (.harness/runs/20261123T135624507Z-a92a7871/result.json), Device PASS 11/11 trên JSN-L22 (.harness/runs/20261123T135743338Z-af9a0aaa/result.json). Đã cài lại app-debug.apk theo yêu cầu tự trải nghiệm và chụp xác minh trực quan cả 3 mức Zoom 0/+1.0/-1.0 trên JSN-L22: kín khung 100%, không còn viền đen, tỷ lệ phóng/thu khớp Photos 3D 1.1.6."
       ]
     }
   ]

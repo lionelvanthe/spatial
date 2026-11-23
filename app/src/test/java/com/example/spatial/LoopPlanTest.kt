@@ -1,7 +1,10 @@
 package com.example.spatial
 
+import com.example.spatial.gl.AnimatedGifEncoder
+import com.example.spatial.gl.GifExporter
 import com.example.spatial.gl.LoopPlan
 import com.example.spatial.gl.MotionPattern
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -136,5 +139,54 @@ class LoopPlanTest {
         assertEquals(0, w % 16)
         assertEquals(0, h % 16)
         assertTrue(maxOf(w, h) <= 1088)
+    }
+
+    @Test
+    fun allMotionPatternsIncludesAll16OriginalPatternsAndZoom() {
+        val ids = com.example.spatial.ui.ALL_MOTION_PATTERNS.map { it.id }.toSet()
+        val expected = listOf(
+            "horizontal", "vertical", "diagonal_bottom_top", "diagonal_top_bottom",
+            "half_circle_bottom", "half_circle_top", "circular_cw", "circular_ccw",
+            "triangular_cw", "square_cw", "square_ccw", "eight_horizontal",
+            "eight_vertical", "spiral_cw", "horizontal_rapid", "vertical_rapid", "zoom"
+        )
+        for (id in expected) {
+            assertTrue("Missing motion pattern '$id' in ALL_MOTION_PATTERNS", id in ids)
+        }
+    }
+
+    @Test
+    fun gifSizeRespectsMaxSideAndMultipleOfFour() {
+        val (w, h) = GifExporter.gifSize(1280, 853, 480)
+        assertEquals(0, w % 4)
+        assertEquals(0, h % 4)
+        assertTrue(maxOf(w, h) <= 480)
+    }
+
+    @Test
+    fun animatedGifEncoderProducesValidLoopingGif89a() {
+        val out = ByteArrayOutputStream()
+        val w = 16
+        val h = 12
+        val enc = AnimatedGifEncoder(w, h, out)
+        val frame1 = IntArray(w * h) { i ->
+            val x = i % w
+            (0xFF shl 24) or ((x * 16) shl 16) or (80 shl 8) or 160
+        }
+        val frame2 = IntArray(w * h) { i ->
+            val y = i / w
+            (0xFF shl 24) or (40 shl 16) or ((y * 20) shl 8) or 200
+        }
+        enc.addFrame(frame1, delayCs = 7)
+        enc.addFrame(frame2, delayCs = 7)
+        enc.finish()
+
+        val bytes = out.toByteArray()
+        assertTrue("GIF output too short: ${bytes.size}", bytes.size > 800)
+        val header = String(bytes, 0, 6, Charsets.US_ASCII)
+        assertEquals("GIF89a", header)
+        val bodyAscii = String(bytes, Charsets.ISO_8859_1)
+        assertTrue("Missing NETSCAPE2.0 loop extension", bodyAscii.contains("NETSCAPE2.0"))
+        assertEquals("GIF trailer must be 0x3B", 0x3B.toByte(), bytes.last())
     }
 }

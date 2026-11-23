@@ -5,11 +5,17 @@ import ai.onnxruntime.OnnxJavaType
 import ai.onnxruntime.TensorInfo
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.os.Build
+import android.os.SystemClock
 import android.util.Log
+import com.example.spatial.ai.DepthPreprocess.DepthModelSpec
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
@@ -19,30 +25,111 @@ import java.util.Collections
 import kotlin.math.hypot
 
 /**
- * Runs the bundled UINT8 RGB/NHWC depth model, with a heuristic fallback on inference failure.
+ * Runs the bundled UINT8 RGB/NHWC depth models (`model_512.onnx` / `model_256.onnx`) with adaptive
+ * device selection matching Photos 3D 1.1.6, and a heuristic fallback on inference failure.
  */
 class DepthEstimationManager(private val context: Context) {
 
+    @Volatile
     private var ortEnvironment: OrtEnvironment? = null
+    @Volatile
     private var ortSession: OrtSession? = null
+    @Volatile
     private var isModelLoaded = false
+    @Volatile
+    private var isClosed = false
+    @Volatile
+    var activeModelSpec: DepthModelSpec = DepthModelSpec.SMALL
+        private set
+    private val initMutex = Mutex()
+    private val prefs by lazy {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
+    private fun hasSufficientMemoryForLargeModel(): Boolean {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return true
+        if (am.isLowRamDevice) return false
+        val info = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(info)
+        // Prefer 512x512 model on devices with >= 3 GB total RAM (matches Photos 3D device tiering).
+        return info.totalMem >= 3L * 1024L * 1024L * 1024L
+    }
+
+    private fun chooseModelSpec(): DepthModelSpec {
+        val savedType = prefs.getString(KEY_MODEL_TYPE, null)
+        val avgDuration = prefs.getLong(KEY_AVG_DURATION, 0L)
+        val runCount = prefs.getLong(KEY_RUN_COUNT, 0L)
+        val decision = DepthPreprocess.selectAdaptiveModel(
+            savedType = savedType,
+            avgDurationMs = avgDuration,
+            runCount = runCount,
+            sdkInt = Build.VERSION.SDK_INT,
+            preferLarge = hasSufficientMemoryForLargeModel()
+        )
+        val editor = prefs.edit()
+        if (decision.shouldResetStats) {
+            editor.putLong(KEY_AVG_DURATION, 0L).putLong(KEY_RUN_COUNT, 0L)
+        }
+        if (savedType != decision.spec.code) {
+            editor.putString(KEY_MODEL_TYPE, decision.spec.code)
+        }
+        editor.apply()
+        return decision.spec
+    }
+
+    private fun recordInferenceDuration(durationMs: Long) {
+        if (durationMs <= 0L) return
+        val prevCount = prefs.getLong(KEY_RUN_COUNT, 0L).coerceAtLeast(0L)
+        val prevAvg = prefs.getLong(KEY_AVG_DURATION, 0L).coerceAtLeast(0L)
+        val newCount = prevCount + 1L
+        val newAvg = ((prevAvg * prevCount) + durationMs) / newCount
+        prefs.edit()
+            .putLong(KEY_RUN_COUNT, newCount)
+            .putLong(KEY_AVG_DURATION, newAvg)
+            .apply()
+    }
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
-        if (isModelLoaded) return@withContext
-        try {
-            ortEnvironment = OrtEnvironment.getEnvironment()
-            // A distinct cache key prevents older FLOAT/NCHW models surviving an app update.
-            val modelPath = copyAssetToInternalStorage("d_models/model_256.onnx", "model_256_uint8_nhwc_v1.onnx")
+        initMutex.withLock {
+            if (isModelLoaded || isClosed) return@withLock
+            val preferred = chooseModelSpec()
+            val candidates = if (preferred == DepthModelSpec.LARGE) {
+                listOf(DepthModelSpec.LARGE, DepthModelSpec.SMALL)
+            } else {
+                listOf(DepthModelSpec.SMALL)
+            }
+            for (spec in candidates) {
+                if (tryLoadModel(spec)) {
+                    activeModelSpec = spec
+                    return@withLock
+                }
+            }
+            isModelLoaded = false
+        }
+    }
+
+    private fun tryLoadModel(spec: DepthModelSpec): Boolean {
+        return try {
+            val env = OrtEnvironment.getEnvironment()
+            ortEnvironment = env
+            val modelPath = copyAssetToInternalStorage(spec.assetPath, spec.cacheFileName)
             if (modelPath != null && File(modelPath).exists()) {
                 OrtSession.SessionOptions().use { opts ->
-                    ortSession = ortEnvironment?.createSession(modelPath, opts)
+                    ortSession = env.createSession(modelPath, opts)
                 }
                 isModelLoaded = ortSession != null
-                Log.d(TAG, "ONNX model_256.onnx loaded successfully")
+                if (isModelLoaded) {
+                    Log.d(TAG, "ONNX ${spec.assetPath} loaded successfully (input=${spec.inputSize}, out=${spec.outputSize})")
+                }
+                isModelLoaded
+            } else {
+                false
             }
         } catch (e: Throwable) {
-            Log.w(TAG, "ONNX model load failed, fallback will be used: ${e.message}")
+            Log.w(TAG, "ONNX ${spec.assetPath} load failed: ${e.message}")
+            ortSession = null
             isModelLoaded = false
+            false
         }
     }
 
@@ -70,6 +157,11 @@ class DepthEstimationManager(private val context: Context) {
     suspend fun estimateDepth(bitmap: Bitmap, onProgress: (Float) -> Unit): ByteArray = withContext(Dispatchers.Default) {
         onProgress(0.1f)
 
+        // Ensure ONNX initialization finishes before falling back (e.g. when launched via ACTION_SEND).
+        if (!isModelLoaded && !isClosed) {
+            initialize()
+        }
+
         // Try ONNX first if loaded
         if (isModelLoaded && ortSession != null && ortEnvironment != null) {
             try {
@@ -94,38 +186,73 @@ class DepthEstimationManager(private val context: Context) {
     private fun runOnnxInference(bitmap: Bitmap): ByteArray? {
         val session = ortSession ?: return null
         val env = ortEnvironment ?: return null
+        val spec = activeModelSpec
 
         val input = session.inputInfo.entries.single()
         val info = input.value.info as? TensorInfo ?: error("Depth input must be a tensor")
-        require(info.type == OnnxJavaType.UINT8 && info.shape.contentEquals(longArrayOf(1, 256, 256, 3))) {
-            "Unsupported depth input: ${info.type} ${info.shape.contentToString()}"
+        val inputSize = spec.inputSize
+        val contentSize = spec.outputSize
+        require(
+            info.type == OnnxJavaType.UINT8 &&
+                info.shape.contentEquals(longArrayOf(1, inputSize.toLong(), inputSize.toLong(), 3))
+        ) {
+            "Unsupported depth input: ${info.type} ${info.shape.contentToString()} (expected $inputSize)"
         }
-        // The bundled graph performs NHWC->NCHW, /255 and ImageNet normalization itself.
-        // Channel order is RGB, interleaved bytes, with no external normalization or inversion.
-        val scaled = Bitmap.createScaledBitmap(bitmap, 256, 256, true)
-        val pixels = IntArray(256 * 256)
+
+        // Match Photos 3D 1.1.6 (`zp2.f` + `hl0.doInBackground`): scale image to contentSize x contentSize
+        // (504 or 252), stream directly into a direct ByteBuffer with black right/bottom margin to avoid
+        // multi-megabyte intermediate arrays, and preserve full 504x504 native ONNX output detail.
+        val startMs = SystemClock.uptimeMillis()
+        val scaled = Bitmap.createScaledBitmap(bitmap, contentSize, contentSize, true)
+        val rowPixels = IntArray(contentSize)
+        val rowBytes = ByteArray(inputSize * 3)
+        val buffer = ByteBuffer.allocateDirect(inputSize * inputSize * 3).order(ByteOrder.nativeOrder())
         try {
-            scaled.getPixels(pixels, 0, 256, 0, 0, 256, 256)
+            for (y in 0 until contentSize) {
+                scaled.getPixels(rowPixels, 0, contentSize, 0, y, contentSize, 1)
+                for (x in 0 until contentSize) {
+                    val px = rowPixels[x]
+                    val idx = x * 3
+                    rowBytes[idx] = (px shr 16).toByte()
+                    rowBytes[idx + 1] = (px shr 8).toByte()
+                    rowBytes[idx + 2] = px.toByte()
+                }
+                // Right margin bytes [contentSize*3 .. inputSize*3) stay 0 (black)
+                buffer.put(rowBytes)
+            }
+            // Bottom margin rows [contentSize .. inputSize) stay 0 (black)
+            rowBytes.fill(0)
+            for (y in contentSize until inputSize) {
+                buffer.put(rowBytes)
+            }
         } finally {
             if (scaled !== bitmap) scaled.recycle()
         }
-        val bytes = DepthPreprocess.rgbNhwc(pixels)
-        val buffer = ByteBuffer.allocateDirect(bytes.size).order(ByteOrder.nativeOrder())
-        buffer.put(bytes).rewind()
+        buffer.rewind()
         OnnxTensor.createTensor(env, buffer, info.shape, OnnxJavaType.UINT8).use { tensor ->
             session.run(Collections.singletonMap(input.key, tensor)).use { results ->
                 val output = results.get(0) as? OnnxTensor ?: error("Depth output must be a tensor")
                 val outputInfo = output.info
                 val shape = outputInfo.shape
-                require(outputInfo.type == OnnxJavaType.UINT8 && shape.size == 3 && shape[0] == 1L &&
-                    shape[1] > 0 && shape[2] > 0) { "Unsupported depth output: $outputInfo" }
-                val height = shape[1].toInt(); val width = shape[2].toInt()
+                require(
+                    outputInfo.type == OnnxJavaType.UINT8 && shape.size == 3 && shape[0] == 1L &&
+                        shape[1] > 0 && shape[2] > 0
+                ) { "Unsupported depth output: $outputInfo" }
+                val height = shape[1].toInt()
+                val width = shape[2].toInt()
                 val out = output.byteBuffer ?: error("Missing UINT8 depth buffer")
                 require(out.remaining() == width * height)
                 val values = ByteArray(out.remaining())
                 out.get(values)
-                // Output is already normalized to 0..255 by the graph; retain its polarity.
-                return DepthPreprocess.resizeBilinear(values, width, height, 504, 504)
+                recordInferenceDuration(SystemClock.uptimeMillis() - startMs)
+
+                // Match Photos 3D 1.1.6 `hl0.doInBackground`: keep native 504x504 model_512 output crisp
+                // without 1/4-resolution downsampling blur; only upsample model_256 (252x252 -> 504x504).
+                return if (width == 504 && height == 504) {
+                    values
+                } else {
+                    DepthPreprocess.resizeBilinear(values, width, height, 504, 504)
+                }
             }
         }
     }
@@ -138,7 +265,11 @@ class DepthEstimationManager(private val context: Context) {
         val targetSize = 504
         val scaled = Bitmap.createScaledBitmap(bitmap, targetSize, targetSize, true)
         val pixels = IntArray(targetSize * targetSize)
-        scaled.getPixels(pixels, 0, targetSize, 0, 0, targetSize, targetSize)
+        try {
+            scaled.getPixels(pixels, 0, targetSize, 0, 0, targetSize, targetSize)
+        } finally {
+            if (scaled !== bitmap) scaled.recycle()
+        }
 
         val depthBytes = ByteArray(targetSize * targetSize)
         val centerX = targetSize / 2.0f
@@ -173,9 +304,12 @@ class DepthEstimationManager(private val context: Context) {
     }
 
     fun close() {
+        isClosed = true
+        isModelLoaded = false
         try {
+            // Only close the session; OrtEnvironment is a process-wide singleton.
             ortSession?.close()
-            ortEnvironment?.close()
+            ortSession = null
         } catch (e: Exception) {
             Log.e(TAG, "Error closing ONNX session", e)
         }
@@ -183,5 +317,9 @@ class DepthEstimationManager(private val context: Context) {
 
     companion object {
         private const val TAG = "DepthEstimationManager"
+        private const val PREFS_NAME = "spatial_depth_model_prefs"
+        private const val KEY_MODEL_TYPE = "da_model_type"
+        private const val KEY_AVG_DURATION = "da_avg_duration"
+        private const val KEY_RUN_COUNT = "da_count"
     }
 }

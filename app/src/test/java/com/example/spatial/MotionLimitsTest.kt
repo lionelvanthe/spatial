@@ -7,13 +7,23 @@ import org.junit.Test
 
 class MotionLimitsTest {
     @Test fun strongBundledMetadataIsClamped() {
-        // Same shape as the astronaut preset: zoom and zoom3D at their maximum.
-        val c = SpatialSceneConfig(intensity = 9f, depthCenter = 4f, speed = 7f, zoom = 1f, zoom3D = 1f).sanitized()
+        // Values above Photos 3D limits are clamped to their safe upper bounds.
+        val c = SpatialSceneConfig(intensity = 9f, depthCenter = 4f, speed = 7f, zoom = 5f, zoom3D = 5f).sanitized()
         assertEquals(MotionLimits.MAX_INTENSITY, c.intensity, 0f)
         assertEquals(1f, c.depthCenter, 0f)
         assertEquals(1f, c.speed, 0f)
         assertEquals(MotionLimits.MAX_ZOOM, c.zoom, 0f)
         assertEquals(MotionLimits.MAX_ZOOM_3D, c.zoom3D, 0f)
+    }
+
+    @Test fun bundledSceneZoomsArePreservedOnPhotos3DScale() {
+        // Values from alpine_desc.dat (0.6984), astronaut_desc.dat (1.0), and negative zoom (-0.8).
+        val alpine = SpatialSceneConfig(zoom = 0.69841528f).sanitized()
+        val astronaut = SpatialSceneConfig(zoom = 1.0f).sanitized()
+        val zoomOut = SpatialSceneConfig(zoom = -0.8f).sanitized()
+        assertEquals(0.69841528f, alpine.zoom, 1e-5f)
+        assertEquals(1.0f, astronaut.zoom, 1e-5f)
+        assertEquals(-0.8f, zoomOut.zoom, 1e-5f)
     }
 
     @Test fun sliderAndRestoredValuesAreClamped() {

@@ -15,12 +15,11 @@ import android.opengl.GLES20
 import android.opengl.GLUtils
 import android.view.Surface
 import com.example.spatial.data.SpatialSceneConfig
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
+import java.util.concurrent.Executors
 import kotlin.coroutines.coroutineContext
 import kotlin.math.PI
 import kotlin.math.ceil
@@ -69,7 +68,30 @@ class VideoExporter {
         config: SpatialSceneConfig,
         output: File,
         onProgress: (Float) -> Unit
-    ) = withContext(Dispatchers.Default) {
+    ) {
+        val eglExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "SpatialVideoExportEGL")
+        }
+        val eglDispatcher = eglExecutor.asCoroutineDispatcher()
+        try {
+            withContext(eglDispatcher) {
+                exportOnCurrentThread(image, depth, depthWidth, depthHeight, config, output, onProgress)
+            }
+        } finally {
+            eglDispatcher.close()
+            eglExecutor.shutdown()
+        }
+    }
+
+    private suspend fun exportOnCurrentThread(
+        image: Bitmap,
+        depth: ByteArray?,
+        depthWidth: Int,
+        depthHeight: Int,
+        config: SpatialSceneConfig,
+        output: File,
+        onProgress: (Float) -> Unit
+    ) {
         val cfg = config.sanitized()
         // A scene without a pattern would export a still; fall back to a gentle circle.
         val patternId = if (cfg.patternId.equals("none", ignoreCase = true)) "circular_cw" else cfg.patternId
@@ -162,7 +184,6 @@ class VideoExporter {
             inputSurface?.release()
             if (!done) output.delete()
         }
-        Unit
     }
 
     private fun setUpEgl(target: Surface) {
@@ -175,6 +196,7 @@ class VideoExporter {
             EGL14.EGL_GREEN_SIZE, 8,
             EGL14.EGL_BLUE_SIZE, 8,
             EGL14.EGL_ALPHA_SIZE, 8,
+            EGL14.EGL_DEPTH_SIZE, 16,
             EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
             EGL_RECORDABLE_ANDROID, 1,
             EGL14.EGL_NONE
@@ -235,7 +257,9 @@ class VideoExporter {
             val depthBytes = depth ?: ByteArray(16) { 128.toByte() }
             val dw = if (depth != null) depthWidth.coerceAtLeast(1) else 4
             val dh = if (depth != null) depthHeight.coerceAtLeast(1) else 4
-            modelBridge.initializeMesh(depthBytes, dw, dh, imageAspect, gridSize = 96)
+            check(modelBridge.initializeMesh(depthBytes, dw, dh, imageAspect, gridSize = 96)) {
+                "Failed to initialize adaptive mesh for video export"
+            }
 
             GLES20.glGenTextures(1, textureIds, 0)
             upload(image)
@@ -251,22 +275,36 @@ class VideoExporter {
             GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, modelBridge.vertexCount * 5 * 4, null, GLES20.GL_DYNAMIC_DRAW)
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
 
-            android.opengl.Matrix.setIdentityM(modelMatrix, 0)
-            android.opengl.Matrix.setLookAtM(viewMatrix, 0, 0f, 0f, 2f, 0f, 0f, 0f, 0f, 1f, 0f)
+            GLES20.glEnable(GLES20.GL_DEPTH_TEST)
+            GLES20.glDisable(GLES20.GL_CULL_FACE)
+
+            // Use the exact same perspective frustum + fitScale transform as SpatialGLRenderer
+            // so perspective Z-zoom and depth occlusion match the live preview.
+            android.opengl.Matrix.setIdentityM(viewMatrix, 0)
             val viewAspect = width.toFloat() / height.coerceAtLeast(1)
-            if (viewAspect >= imageAspect) {
-                android.opengl.Matrix.orthoM(projectionMatrix, 0, -viewAspect, viewAspect, -1f, 1f, 0.1f, 10f)
+            if (viewAspect <= 1.0f) {
+                android.opengl.Matrix.frustumM(projectionMatrix, 0, -viewAspect, viewAspect, -1f, 1f, 2.0f, 12.0f)
             } else {
-                val halfH = imageAspect / viewAspect
-                android.opengl.Matrix.orthoM(projectionMatrix, 0, -imageAspect, imageAspect, -halfH, halfH, 0.1f, 10f)
+                val invAspect = 1f / viewAspect
+                android.opengl.Matrix.frustumM(projectionMatrix, 0, -1f, 1f, -invAspect, invAspect, 2.0f, 12.0f)
             }
             android.opengl.Matrix.multiplyMM(viewProjectionMatrix, 0, projectionMatrix, 0, viewMatrix, 0)
+
+            val baseFitScale = if (viewAspect <= 1.0f) {
+                if (imageAspect > viewAspect) (viewAspect * 3.5f) / imageAspect else 3.5f
+            } else {
+                if (imageAspect > viewAspect) 3.5f / imageAspect else 3.5f / viewAspect
+            }
+            val fitScale = baseFitScale * 1.075f
+            android.opengl.Matrix.setIdentityM(modelMatrix, 0)
+            android.opengl.Matrix.translateM(modelMatrix, 0, 0f, 0f, -7.0f)
+            android.opengl.Matrix.scaleM(modelMatrix, 0, fitScale, fitScale, fitScale)
         }
 
         fun draw(config: SpatialSceneConfig, patternId: String, progress: Float) {
             GLES20.glViewport(0, 0, width, height)
             GLES20.glClearColor(0.06f, 0.06f, 0.09f, 1.0f)
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT)
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
             modelBridge.setProperties(
                 config.intensity,

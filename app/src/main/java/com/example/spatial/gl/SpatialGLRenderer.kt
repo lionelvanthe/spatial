@@ -12,7 +12,9 @@ import com.example.spatial.data.MotionLimits
 import com.example.spatial.data.SpatialSceneConfig
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.sqrt
@@ -74,10 +76,15 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             if (field != value) {
                 field = value
                 if (value == 1) {
-                    modelBridge.resetPhysics()
+                    pendingPhysicsReset = true
                 }
             }
         }
+
+    @Volatile
+    private var pendingPhysicsReset = false
+    @Volatile
+    private var isReleased = false
 
     // Legacy compatibility property
     var fitImage: Boolean
@@ -86,11 +93,21 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             sceneConfig = sceneConfig.copy(imageFitMode = com.example.spatial.data.ImageFitMode.FIT)
         }
 
-    // Sensor tilt inputs
+    // Sensor tilt & linear-acceleration inputs
     @Volatile
     var gyroX = 0.0f
     @Volatile
     var gyroY = 0.0f
+
+    fun onLinearAcceleration(ax: Float, ay: Float) {
+        if (activeTabMode != 1) return
+        // Filter out micro hand tremor (< 0.6 m/s^2) and feed real shake inertia into the jelly mesh
+        val mag = hypot(ax, ay)
+        if (mag > 0.6f) {
+            pendingImpulseX = (pendingImpulseX - ax * 0.055f).coerceIn(-6.0f, 6.0f)
+            pendingImpulseY = (pendingImpulseY - ay * 0.055f).coerceIn(-6.0f, 6.0f)
+        }
+    }
 
     // Touch inputs
     @Volatile
@@ -120,6 +137,8 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     private var lastFrameTimeMs = 0L
     private var animStartTimeMs = 0L
+    private var breathElapsedMs = 0L
+    private var verticesNeedUpload = true
     private var viewportWidth = 1
     private var viewportHeight = 1
 
@@ -130,7 +149,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         depthWidth: Int = 504,
         depthHeight: Int = 504
     ) {
-        if (bitmap == null) return
+        if (bitmap == null || bitmap.isRecycled) return
         synchronized(this) {
             currentBitmap = bitmap
             undrawnBitmap = bitmap
@@ -159,8 +178,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
     fun onTouchMove(dx: Float, dy: Float, @Suppress("UNUSED_PARAMETER") x: Float, @Suppress("UNUSED_PARAMETER") y: Float) {
         if (activeTabMode == 3) {
-            touchPanX = (touchPanX + dx * 2.0f).coerceIn(-1.0f, 1.0f)
-            touchPanY = (touchPanY - dy * 2.0f).coerceIn(-1.0f, 1.0f)
+            val effectiveZoom = (sceneConfig.zoom + touchZoom).coerceIn(MotionLimits.MIN_ZOOM, MotionLimits.MAX_ZOOM)
+            val maxPan = (effectiveZoom.coerceAtLeast(0.0f) * 0.65f).coerceIn(0.0f, 0.75f)
+            touchPanX = (touchPanX + dx * 2.0f).coerceIn(-maxPan, maxPan)
+            touchPanY = (touchPanY - dy * 2.0f).coerceIn(-maxPan, maxPan)
         } else {
             touchDragX = (touchDragX + dx * 2.2f).coerceIn(-1.0f, 1.0f)
             touchDragY = (touchDragY - dy * 2.2f).coerceIn(-1.0f, 1.0f)
@@ -187,10 +208,16 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         touchPanY = 0.0f
         gyroNeutralX = gyroX
         gyroNeutralY = gyroY
-        modelBridge.resetPhysics()
+        pendingPhysicsReset = true
     }
 
     override fun onSurfaceCreated(gl: GL10?, config: EGLConfig?) {
+        if (isReleased) return
+        // EGL context may have been recreated; reset buffer allocation tracking before generating new objects.
+        allocatedVertexBytes = 0
+        hasTexture = false
+        hasMeshBuffers = false
+
         GLES20.glClearColor(0.06f, 0.06f, 0.09f, 1.0f)
         GLES20.glEnable(GLES20.GL_DEPTH_TEST)
         GLES20.glDisable(GLES20.GL_CULL_FACE)
@@ -244,11 +271,13 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     override fun onDrawFrame(gl: GL10?) {
+        if (isReleased) return
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
         if (programHandle == 0) return
 
         val nowMs = SystemClock.uptimeMillis()
-        val dt = ((nowMs - lastFrameTimeMs) / 1000.0f).coerceIn(0.001f, 0.05f)
+        val dtMs = (nowMs - lastFrameTimeMs).coerceIn(1L, 50L)
+        val dt = dtMs / 1000.0f
         lastFrameTimeMs = nowMs
 
         val drawnBitmapCandidate: Bitmap?
@@ -256,6 +285,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val tabMode = activeTabMode
 
         synchronized(this) {
+            if (isReleased) return
             cfg = sceneConfig
             val bmp = currentBitmap
             if (needsTextureReload && bmp != null && !bmp.isRecycled) {
@@ -276,6 +306,11 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 needsDepthReload = false
             }
 
+            if (pendingPhysicsReset) {
+                pendingPhysicsReset = false
+                modelBridge.resetPhysics()
+            }
+
             drawnBitmapCandidate = if (hasTexture && undrawnBitmap != null) {
                 undrawnBitmap.also { undrawnBitmap = null }
             } else null
@@ -286,27 +321,48 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // Update sensor smoothing and auto-centering
         updateTiltState(dt, tabMode)
 
+        val baseZoom = (cfg.zoom + touchZoom).coerceIn(MotionLimits.MIN_ZOOM, MotionLimits.MAX_ZOOM)
+        // Match Photos 3D 1.1.6 `s31.c()` + `performRotationalUpdate` (0x25e68):
+        // zoom breathes smoothly from 0 -> cfg.zoom -> 0 over period (4000 + |zoom|*3000) ms, paused while touching.
+        val combinedZoom = if (tabMode == 0 && abs(cfg.zoom) > 0.001f) {
+            val breathPeriodMs = (4000.0f + abs(cfg.zoom) * 3000.0f).toLong().coerceAtLeast(1L)
+            if (!isTouching) {
+                breathElapsedMs = (breathElapsedMs + dtMs) % breathPeriodMs
+            }
+            val breathPhase = (breathElapsedMs.toFloat() / breathPeriodMs.toFloat()) * (2.0 * PI).toFloat()
+            val breathFactor = 0.5f * (1.0f - cos(breathPhase))
+            (cfg.zoom * breathFactor + touchZoom).coerceIn(MotionLimits.MIN_ZOOM, MotionLimits.MAX_ZOOM)
+        } else {
+            baseZoom
+        }
         modelBridge.setProperties(
             intensity = cfg.intensity,
             depthCenter = cfg.depthCenter,
             rInverted = cfg.rInverted,
-            zoom = cfg.zoom,
+            zoom = combinedZoom,
             zoom3D = cfg.zoom3D,
             elasticity = cfg.elasticity
         )
 
         val viewAspect = viewportWidth.toFloat() / viewportHeight.toFloat()
         val imageAspect = activeBitmapWidth.toFloat() / activeBitmapHeight.toFloat()
-        val fitScale = if (viewAspect <= 1.0f) {
+        // Match Photos 3D 1.1.6 ik0.t/ik0.n border margin (~7.5% overscan) so negative zoom (-1.0)
+        // never shrinks inside the viewport or exposes black bars / uneven depth edges.
+        val baseFitScale = if (viewAspect <= 1.0f) {
             if (imageAspect > viewAspect) (viewAspect * 3.5f) / imageAspect else 3.5f
         } else {
             if (imageAspect > viewAspect) 3.5f / imageAspect else 3.5f / viewAspect
         }
+        val fitScale = baseFitScale * 1.075f
         Matrix.setIdentityM(modelMatrix, 0)
         Matrix.translateM(modelMatrix, 0, 0f, 0f, -7.0f)
         Matrix.scaleM(modelMatrix, 0, fitScale, fitScale, fitScale)
         when (tabMode) {
-            0 -> modelBridge.updateRotate(smoothTiltX, smoothTiltY)
+            0 -> {
+                if (modelBridge.updateRotate(smoothTiltX, smoothTiltY)) {
+                    verticesNeedUpload = true
+                }
+            }
             1 -> {
                 val impX = pendingImpulseX
                 val impY = pendingImpulseY
@@ -316,17 +372,26 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                     modelBridge.applyImpulse(impX, impY)
                 }
                 modelBridge.updateShake(dt, smoothTiltX, smoothTiltY)
+                verticesNeedUpload = true
             }
             2 -> {
                 val pattern = if (cfg.patternId.equals("none", ignoreCase = true)) "horizontal" else cfg.patternId
                 val cycleMs = LoopPlan.cycleMs(cfg.speed) * MotionPattern.periodCycles(pattern)
                 val elapsed = (nowMs - animStartTimeMs).toFloat()
                 val progress = ((elapsed % cycleMs) / cycleMs).coerceIn(0.0f, 1.0f)
-                modelBridge.updateAnimated(progress, MotionPattern.patternIdToNativeInt(pattern))
+                if (modelBridge.updateAnimated(progress, MotionPattern.patternIdToNativeInt(pattern))) {
+                    verticesNeedUpload = true
+                }
             }
             3 -> {
-                val z = (cfg.zoom + touchZoom).coerceIn(MotionLimits.MIN_ZOOM, 1.5f)
-                modelBridge.updateZoomPan(z, touchPanX, touchPanY)
+                val maxPan = (combinedZoom.coerceAtLeast(0.0f) * 0.65f).coerceIn(0.0f, 0.75f)
+                val panX = touchPanX.coerceIn(-maxPan, maxPan)
+                val panY = touchPanY.coerceIn(-maxPan, maxPan)
+                touchPanX = panX
+                touchPanY = panY
+                if (modelBridge.updateZoomPan(combinedZoom, panX, panY)) {
+                    verticesNeedUpload = true
+                }
             }
         }
 
@@ -346,27 +411,27 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         prevGyroX = gx
         prevGyroY = gy
 
-        // Responsive auto-centering from e67e38f:
-        // Slows neutral drift while actively tilting, swiftly recovers within ~0.55s - 0.60s when resting.
+        // Smooth auto-centering tuned closer to Photos 3D `pc1.e`: holds tilt long enough to
+        // appreciate 3D depth while gently recentering over ~1.5-2.0s when resting.
         val motionSpeed = hypot(gyroVx, gyroVy)
         val offsetDistance = hypot(gx - gyroNeutralX, gy - gyroNeutralY)
-        val restingBoost = if (motionSpeed < 0.32f) {
-            1.65f
+        val restingBoost = if (motionSpeed < 0.28f) {
+            1.25f
         } else {
-            (1.0f / (1.0f + motionSpeed * 1.5f)).coerceIn(0.4f, 1.0f)
+            (1.0f / (1.0f + motionSpeed * 1.8f)).coerceIn(0.25f, 1.0f)
         }
-        val edgeBoost = 1.0f + offsetDistance * 1.4f
-        val recenterAlpha = (1.95f * restingBoost * edgeBoost * dt).coerceIn(0.0f, 0.22f)
+        val edgeBoost = 1.0f + offsetDistance * 1.1f
+        val recenterAlpha = (0.65f * restingBoost * edgeBoost * dt).coerceIn(0.0f, 0.06f)
         gyroNeutralX += (gx - gyroNeutralX) * recenterAlpha
         gyroNeutralY += (gy - gyroNeutralY) * recenterAlpha
 
-        if (tabMode == 1 && motionSpeed > 1.2f) {
-            pendingImpulseX += gyroVx * 0.04f
-            pendingImpulseY += gyroVy * 0.04f
+        if (tabMode == 1 && motionSpeed > 1.0f) {
+            pendingImpulseX += gyroVx * 0.06f
+            pendingImpulseY += gyroVy * 0.06f
         }
 
-        val sensorTiltX = softCompress((gx - gyroNeutralX) * 1.35f)
-        val sensorTiltY = softCompress((gy - gyroNeutralY) * 1.35f)
+        val sensorTiltX = softCompress((gx - gyroNeutralX) * 1.75f)
+        val sensorTiltY = softCompress((gy - gyroNeutralY) * 1.75f)
         val rawX = if (isTouching) touchDragX else (sensorTiltX + touchDragX).coerceIn(-1.0f, 1.0f)
         val rawY = if (isTouching) touchDragY else (sensorTiltY + touchDragY).coerceIn(-1.0f, 1.0f)
 
@@ -415,6 +480,7 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0)
             allocatedVertexBytes = neededVBytes
         }
+        verticesNeedUpload = true
     }
 
     private fun drawMesh() {
@@ -429,9 +495,12 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureIds[0])
         GLES20.glUniform1i(uSamplerHandle, 0)
 
-        vb.position(0)
         GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboIds[0])
-        GLES20.glBufferSubData(GLES20.GL_ARRAY_BUFFER, 0, modelBridge.vertexCount * 5 * 4, vb)
+        if (verticesNeedUpload) {
+            vb.position(0)
+            GLES20.glBufferSubData(GLES20.GL_ARRAY_BUFFER, 0, modelBridge.vertexCount * 5 * 4, vb)
+            verticesNeedUpload = false
+        }
 
         val strideBytes = 5 * 4
         GLES20.glEnableVertexAttribArray(aPositionHandle)
@@ -449,19 +518,39 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
         GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0)
     }
 
-    fun release() {
-        modelBridge.destroy()
-        if (hasMeshBuffers) {
-            GLES20.glDeleteBuffers(2, vboIds, 0)
+    /** Releases only the native C++ engine; safe to call from any thread after the GL thread stops. */
+    fun releaseNative() {
+        synchronized(this) {
+            if (isReleased) return
+            isReleased = true
+            modelBridge.destroy()
+            allocatedVertexBytes = 0
+            hasTexture = false
             hasMeshBuffers = false
         }
-        if (textureIds[0] != 0) {
-            GLES20.glDeleteTextures(1, textureIds, 0)
-            textureIds[0] = 0
-        }
-        if (programHandle != 0) {
-            GLES20.glDeleteProgram(programHandle)
-            programHandle = 0
+    }
+
+    fun release() {
+        synchronized(this) {
+            if (isReleased) return
+            isReleased = true
+            modelBridge.destroy()
+            allocatedVertexBytes = 0
+            hasTexture = false
+            if (hasMeshBuffers) {
+                GLES20.glDeleteBuffers(2, vboIds, 0)
+                vboIds[0] = 0
+                vboIds[1] = 0
+                hasMeshBuffers = false
+            }
+            if (textureIds[0] != 0) {
+                GLES20.glDeleteTextures(1, textureIds, 0)
+                textureIds[0] = 0
+            }
+            if (programHandle != 0) {
+                GLES20.glDeleteProgram(programHandle)
+                programHandle = 0
+            }
         }
     }
 

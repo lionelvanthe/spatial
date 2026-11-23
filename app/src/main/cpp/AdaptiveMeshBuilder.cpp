@@ -16,6 +16,7 @@ inline void addTri(std::vector<uint32_t>& out, uint32_t a, uint32_t b, uint32_t 
 // Tessellate a square [gx, gx+step] x [gy, gy+step] with optional midpoints on L/R/T/B edges
 void tessellateSquareWithMidpoints(
     std::vector<uint32_t>& outIndices,
+    const std::vector<float>& smoothDepth,
     int stride,
     int gx,
     int gy,
@@ -35,8 +36,17 @@ void tessellateSquareWithMidpoints(
     uint32_t br = vid(gx + step, gy + step);
 
     if (!midL && !midR && !midT && !midB) {
-        addTri(outIndices, tl, bl, tr);
-        addTri(outIndices, tr, bl, br);
+        // Depth-aware diagonal split: align shared diagonal along the smaller depth gradient
+        // to eliminate sawtooth/zigzag artifacts along diagonal foreground-background edges.
+        float diagMain = std::fabs(smoothDepth[tl] - smoothDepth[br]);
+        float diagAnti = std::fabs(smoothDepth[tr] - smoothDepth[bl]);
+        if (diagMain <= diagAnti) {
+            addTri(outIndices, tl, bl, br);
+            addTri(outIndices, tl, br, tr);
+        } else {
+            addTri(outIndices, tl, bl, tr);
+            addTri(outIndices, tr, bl, br);
+        }
         return;
     }
 
@@ -145,8 +155,8 @@ AdaptiveMeshData AdaptiveMeshBuilder::build(
     const int coarseH = gridSize / 4;
     std::vector<int> blockLevel(coarseW * coarseH, 4);
 
-    constexpr float THRESHOLD_4 = 0.004f;
-    constexpr float THRESHOLD_2 = 0.012f;
+    constexpr float THRESHOLD_4 = 0.0025f;
+    constexpr float THRESHOLD_2 = 0.0085f;
 
     for (int by = 0; by < coarseH; ++by) {
         for (int bx = 0; bx < coarseW; ++bx) {
@@ -213,7 +223,7 @@ AdaptiveMeshData AdaptiveMeshBuilder::build(
                 bool midR = getBlockLevel(bx + 1, by) < 4;
                 bool midT = getBlockLevel(bx, by - 1) < 4;
                 bool midB = getBlockLevel(bx, by + 1) < 4;
-                tessellateSquareWithMidpoints(rawIndices, stride, gx0, gy0, 4, midL, midR, midT, midB);
+                tessellateSquareWithMidpoints(rawIndices, smoothDepth, stride, gx0, gy0, 4, midL, midR, midT, midB);
             } else if (lvl == 2) {
                 bool fineL = getBlockLevel(bx - 1, by) == 1;
                 bool fineR = getBlockLevel(bx + 1, by) == 1;
@@ -223,6 +233,7 @@ AdaptiveMeshData AdaptiveMeshBuilder::build(
                     for (int sx = 0; sx < 2; ++sx) {
                         tessellateSquareWithMidpoints(
                             rawIndices,
+                            smoothDepth,
                             stride,
                             gx0 + sx * 2,
                             gy0 + sy * 2,
@@ -239,6 +250,7 @@ AdaptiveMeshData AdaptiveMeshBuilder::build(
                     for (int sx = 0; sx < 4; ++sx) {
                         tessellateSquareWithMidpoints(
                             rawIndices,
+                            smoothDepth,
                             stride,
                             gx0 + sx,
                             gy0 + sy,

@@ -18,9 +18,10 @@ object MotionLimits {
     // Photos 3D scale, as stored in the bundled _desc.dat files (slider 0..1.25, default 0.8).
     const val DEFAULT_INTENSITY = 0.8f
     const val MAX_INTENSITY = 1.25f
-    const val MIN_ZOOM = -0.35f
-    const val MAX_ZOOM = 0.35f
-    const val MAX_ZOOM_3D = 0.35f
+    // Photos 3D 1.1.6 activity_image_view_zoom_property_slider: valueFrom=-1, valueTo=1.
+    const val MIN_ZOOM = -1.0f
+    const val MAX_ZOOM = 1.0f
+    const val MAX_ZOOM_3D = 1.0f
     const val DEFAULT_ELASTICITY = 0.5f
     const val MIN_ELASTICITY = 0.0f
     const val MAX_ELASTICITY = 1.0f
@@ -45,8 +46,8 @@ data class SpatialSceneConfig(
     val intensity: Float = MotionLimits.DEFAULT_INTENSITY,
     val depthCenter: Float = 0.5f,
     val speed: Float = 0.35f,
-    val zoom: Float = 0.0f,             // 2D/3D image zoom (-1.0 to 1.0)
-    val zoom3D: Float = 0.0f,           // Legacy metadata only; no longer used for rendering.
+    val zoom: Float = 0.0f,             // 2D/3D image zoom (-0.35 to 0.35)
+    val zoom3D: Float = 0.0f,           // Depth-weighted 3D zoom blend (0.0 to 1.0, Photos 3D 1.1.6)
     val elasticity: Float = MotionLimits.DEFAULT_ELASTICITY, // Jelly bounce/elasticity (0.0 to 1.0)
     val rInverted: Boolean = false,     // Invert gyro / motion
     val wallTargetX: Float = 0.5f,
