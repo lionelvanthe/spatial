@@ -1,21 +1,23 @@
 # Bàn giao hiện tại
 
 - Ngày: 2026-11-24 (Asia/Saigon).
-- Phạm vi: `WALLPAPER-116` (`done`) — Đồng bộ toàn bộ luồng Apply Live Wallpaper theo `Photos 3D 1.1.6` (`sk0.z`, `ImageViewActivity.onClick(Q0)`, `tv1`, `h41`, `rv1.n`).
+- Phạm vi: `PAGE16K-001` (`done`) — Khắc phục lỗi tương thích 16 KB memory page size cho Android 15+ (ELF `LOAD` alignment `0x4000` và APK zip-align 16 KB).
+- Nguyên nhân gốc:
+  - `com.microsoft.onnxruntime:onnxruntime-android:1.17.1` đóng gói `libonnxruntime.so` và `libonnxruntime4j_jni.so` với `LOAD` segment `p_align = 0x1000` (4 KB) trên mọi ABI.
+  - Ngoài ra, khi nâng lên `onnxruntime-android:1.21.1+`, CPU Execution Provider mặc định gọi kernel MLAS FP16 (`fneg v2.8h`) gây `SIGILL` trên CPU ARMv8.0-A không có `FEAT_FP16` (như `JSN-L22` / Kirin 710).
 - Thực hiện:
-  - **FILL toàn màn hình & căn tâm Wallpaper (`app/src/main/java/com/example/spatial/gl/SpatialGLRenderer.kt`)**:
-    - Thêm `isWallpaperFillMode`, `isWallpaperFramingTouchMode`, `onWallpaperTargetChanged`: khi đặt/xem trước Wallpaper sẽ scale theo FILL (`maxOf`) + overscan `1.075×` và dịch chuyển theo `wallTargetX`/`wallTargetY` kẹp chặt trong biên dư (tuyệt đối không lộ viền đen).
-  - **Wallpaper Service (`app/src/main/java/com/example/spatial/wallpaper/SpatialWallpaperService.kt`)**:
-    - Bật `isWallpaperFillMode = true` và `preserveEGLContextOnPause = true`.
-    - Đọc `wallpaper_tab_mode` (`0 = Rotate`, `1 = Shake`, `2 = Animations`) và `wallpaper_updated_at` để áp đúng chế độ người dùng chọn và reload tức thì khi đặt ảnh mới.
-    - Nối thêm `onLinearAcceleration` cho chế độ Shake trên màn hình chính.
-  - **Lưu đồng bộ & Chế độ căn chỉnh Wallpaper (`SpatialViewModel.kt`, `MainScreen.kt`)**:
-    - Đổi `persistCurrentSceneForWallpaper` sang `suspend` dùng `commit()` trên `Dispatchers.IO`, chờ ghi xong hoàn toàn ảnh/depth/config/mode rồi mới mở `ACTION_CHANGE_LIVE_WALLPAPER` (hết lỗi race condition hiện ảnh cũ hoặc `alpine`).
-    - Bấm nút Wallpaper trên toolbar mở chế độ **Căn chỉnh hình nền** toàn màn hình (kéo pan chọn vùng hiển thị) cùng nút nổi **FAB "Đặt hình nền"** (`viewer_confirm_wallpaper_fab`) và hỗ trợ `BackHandler`.
+  - `app/src/main/cpp/CMakeLists.txt`: Thêm `target_link_options(spatial_mesh PRIVATE "-Wl,-z,max-page-size=16384")`.
+  - `app/build.gradle.kts`:
+    - Thêm `-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON` trong `defaultConfig.externalNativeBuild.cmake.arguments`.
+    - Thêm `packaging { jniLibs { useLegacyPackaging = false } }` để các `.so` lưu uncompressed và căn 16 KB trong APK.
+    - Nâng `com.microsoft.onnxruntime:onnxruntime-android` từ `1.17.1` lên `1.21.1` (bản đầu tiên có cả `libonnxruntime.so` và `libonnxruntime4j_jni.so` đạt `0x4000` trên `arm64-v8a` và `x86_64`).
+  - `app/src/main/java/com/example/spatial/ai/DepthEstimationManager.kt`: Bật `opts.addXnnpack(emptyMap())` (có fallback an toàn `try/catch`) để tăng tốc inference CPU và tránh `SIGILL` MLAS FP16 trên ARMv8.0-A.
 - Kết quả kiểm tra:
   - `git diff --check`: **PASS**.
-  - `./scripts/harness.ps1 -Mode Verify`: **PASS** (`.harness/runs/20261124T053218083Z-f312338e/result.json`) — `:app:testDebugUnitTest`, `:app:lintDebug`, CMake C++ (`arm64-v8a`, `armeabi-v7a`, `x86_64`), `:app:assembleDebug` đều `BUILD SUCCESSFUL`.
-  - `./scripts/harness.ps1 -Mode Device` trên thiết bị thật `JSN-L22` (Android 10): **PASS** (`.harness/runs/20261124T053448368Z-44061890/result.json`) — `11/11` `connectedDebugAndroidTest` PASS (`0 failed`, `0 errors`, `0 skipped`).
+  - `./scripts/harness.ps1 -Mode Verify`: **PASS** (`.harness/runs/20261124T060418523Z-28e11376/result.json`) — `:app:testDebugUnitTest`, `:app:lintDebug`, CMake C++ (`arm64-v8a`, `armeabi-v7a`, `x86_64`), `:app:assembleDebug` đều `BUILD SUCCESSFUL`.
+  - `zipalign -c -P 16 -v 4 app/build/outputs/apk/debug/app-debug.apk`: **PASS** (`Verification successful`, 12/12 `.so` đều `(OK)`).
+  - `llvm-readelf -l` trên các `.so` giải nén từ `app-debug.apk`: **PASS** — 8/8 `.so` 64-bit (`arm64-v8a` và `x86_64`) đều `stored=True` và mọi `LOAD` segment đều `p_align = 0x4000` (16 KB).
+  - `./scripts/harness.ps1 -Mode Device` trên thiết bị thật `JSN-L22` (Android 10): **PASS** (`.harness/runs/20261124T060601784Z-5914b0a3/result.json`) — `11/11` `connectedDebugAndroidTest` PASS (`0 failed`, `0 errors`, `0 skipped`, gồm `DepthInferenceTest` chạy `model_512.onnx` trong `3.608s`).
 - Chưa xác minh / Bước tiếp theo:
-  - Chưa commit các thay đổi của `WALLPAPER-116` sau commit `4278044`.
-  - Chưa xác minh thủ công trực quan ngoài màn hình chính sau khi bấm "Đặt hình nền" trên thiết bị thật (`WALLPAPER-001`).
+  - Chưa test chạy runtime trực tiếp trên thiết bị/emulator Android 15+ dùng kernel 16 KB page size (máy kết nối hiện tại `JSN-L22` chạy Android 10 / 4 KB).
+  - Chưa commit các thay đổi của `PAGE16K-001` (đợi người dùng yêu cầu).

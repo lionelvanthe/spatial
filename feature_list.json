@@ -612,6 +612,25 @@
         "2026-11-24: SpatialViewModel.kt & MainScreen.kt: đổi persistCurrentSceneForWallpaper thành suspend dùng commit() ghi xong ảnh/depth/config/mode trên Dispatchers.IO trước khi mở ACTION_CHANGE_LIVE_WALLPAPER; bổ sung chế độ căn chỉnh hình nền toàn màn hình (kéo pan chọn vị trí + BackHandler + ExtendedFloatingActionButton Đặt hình nền).",
         "2026-11-24: git diff --check PASS. harness.ps1 -Mode Verify PASS (.harness/runs/20261124T053218083Z-f312338e/result.json): testDebugUnitTest, lintDebug, CMake C++ 3 ABI, assembleDebug. harness.ps1 -Mode Device PASS trên JSN-L22 (.harness/runs/20261124T053448368Z-44061890/result.json): 11/11 connectedDebugAndroidTest PASS."
       ]
+    },
+    {
+      "id": "PAGE16K-001",
+      "title": "Khắc phục tương thích 16 KB memory page size cho Android 15+ (ELF alignment 0x4000 và zip-align 16 KB)",
+      "status": "done",
+      "depends_on": [],
+      "acceptance": [
+        "CMakeLists.txt và app/build.gradle.kts bật rõ -Wl,-z,max-page-size=16384, -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON và jniLibs.useLegacyPackaging=false",
+        "Nâng onnxruntime-android từ 1.17.1 (LOAD 0x1000) lên phiên bản hỗ trợ 16 KB page size",
+        "Toàn bộ file .so arm64-v8a và x86_64 trong APK đều có LOAD segment p_align >= 0x4000 (16 KB) và offset trong APK chia hết cho 16384",
+        "Chạy Verify và Device (gồm DepthInferenceTest với model_512.onnx) trên JSN-L22 pass"
+      ],
+      "evidence": [
+        "2026-11-24: Kiểm tra ELF LOAD segments trước khi sửa bằng llvm-readelf: libspatial_mesh.so và libandroidx.graphics.path.so đã là 0x4000, nhưng com.microsoft.onnxruntime:onnxruntime-android:1.17.1 đóng gói libonnxruntime.so và libonnxruntime4j_jni.so với LOAD p_align=0x1000 (4 KB) trên mọi ABI.",
+        "2026-11-24: Đã sửa app/src/main/cpp/CMakeLists.txt (thêm target_link_options -Wl,-z,max-page-size=16384), app/build.gradle.kts (thêm -DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON, packaging.jniLibs.useLegacyPackaging=false, nâng onnxruntime-android 1.17.1 -> 1.21.1).",
+        "2026-11-24: Trong quá trình test Device trên JSN-L22 (Kirin 710 ARMv8.0-A không có FEAT_FP16), ORT 1.21+ CPU EP gây SIGILL tại lệnh fneg v2.8h (0x6ef8f842) trong MLAS FP16. Đã thêm opts.addXnnpack(emptyMap()) trong DepthEstimationManager.kt để dùng XNNPACK EP với kiểm tra CPU feature lúc chạy, khắc phục hoàn toàn SIGILL trên ARMv8.0-A.",
+        "2026-11-24: Kiểm tra APK sau build (app/build/outputs/apk/debug/app-debug.apk): zipalign -c -P 16 -v 4 báo Verification successful với 12/12 file .so (OK); llvm-readelf -l xác nhận 8/8 file .so 64-bit (arm64-v8a và x86_64: libspatial_mesh.so, libandroidx.graphics.path.so, libonnxruntime.so, libonnxruntime4j_jni.so) đều stored=True (uncompressed) và mọi LOAD segment đều p_align=0x4000.",
+        "2026-11-24: git diff --check PASS. harness.ps1 -Mode Verify PASS (.harness/runs/20261124T060418523Z-28e11376/result.json): testDebugUnitTest, lintDebug, CMake C++ 3 ABI, assembleDebug. harness.ps1 -Mode Device PASS trên JSN-L22 Android 10 (.harness/runs/20261124T060601784Z-5914b0a3/result.json): 11/11 connectedDebugAndroidTest PASS (bao gồm DepthInferenceTest 3.608s). Chưa chạy kiểm tra boot/runtime trực tiếp trên máy hoặc emulator Android 15+ chạy nhân 16 KB page size."
+      ]
     }
   ]
 }

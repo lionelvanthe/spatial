@@ -115,6 +115,13 @@ class DepthEstimationManager(private val context: Context) {
             val modelPath = copyAssetToInternalStorage(spec.assetPath, spec.cacheFileName)
             if (modelPath != null && File(modelPath).exists()) {
                 OrtSession.SessionOptions().use { opts ->
+                    // Enable XNNPACK EP for faster mobile CPU inference and proper runtime FP16
+                    // feature detection (avoids MLAS FP16 SIGILL on ARMv8.0-A CPUs without FEAT_FP16).
+                    try {
+                        opts.addXnnpack(emptyMap())
+                    } catch (e: Throwable) {
+                        Log.w(TAG, "XNNPACK EP unavailable: ${e.message}")
+                    }
                     ortSession = env.createSession(modelPath, opts)
                 }
                 isModelLoaded = ortSession != null
