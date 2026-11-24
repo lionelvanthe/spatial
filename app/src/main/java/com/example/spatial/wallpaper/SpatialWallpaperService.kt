@@ -32,7 +32,12 @@ class SpatialWallpaperService : WallpaperService() {
         private var lastLoadedSignature: String? = null
 
         private val prefListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == "wallpaper_scene_id" || key == "wallpaper_config" || key == "wallpaper_is_custom") {
+            if (key == "wallpaper_scene_id" ||
+                key == "wallpaper_config" ||
+                key == "wallpaper_is_custom" ||
+                key == "wallpaper_tab_mode" ||
+                key == "wallpaper_updated_at"
+            ) {
                 scheduleLoadWallpaperScene(force = true)
             }
         }
@@ -40,11 +45,19 @@ class SpatialWallpaperService : WallpaperService() {
         override fun onCreate(surfaceHolder: SurfaceHolder?) {
             super.onCreate(surfaceHolder)
 
-            renderer = SpatialGLRenderer(applicationContext)
-            sensorTracker = SpatialSensorTracker(applicationContext) { tiltX, tiltY ->
-                renderer?.gyroX = tiltX
-                renderer?.gyroY = tiltY
+            renderer = SpatialGLRenderer(applicationContext).apply {
+                isWallpaperFillMode = true
             }
+            sensorTracker = SpatialSensorTracker(
+                context = applicationContext,
+                onSensorUpdate = { tiltX, tiltY ->
+                    renderer?.gyroX = tiltX
+                    renderer?.gyroY = tiltY
+                },
+                onLinearAcceleration = { ax, ay ->
+                    renderer?.onLinearAcceleration(ax, ay)
+                }
+            )
 
             scheduleLoadWallpaperScene(force = true)
 
@@ -69,9 +82,13 @@ class SpatialWallpaperService : WallpaperService() {
                 val isCustom = prefs.getBoolean("wallpaper_is_custom", false)
                 val sceneId = prefs.getString("wallpaper_scene_id", "alpine") ?: "alpine"
                 val configStr = prefs.getString("wallpaper_config", null)
+                val tabMode = prefs.getInt("wallpaper_tab_mode", 0).let { if (it in 0..2) it else 0 }
+                val updatedAt = prefs.getLong("wallpaper_updated_at", 0L)
                 val customImgFile = java.io.File(applicationContext.filesDir, "custom_wallpaper.jpg")
-                val signature = "$isCustom|$sceneId|$configStr|${if (isCustom) customImgFile.lastModified() else 0L}"
+                val signature = "$isCustom|$sceneId|$configStr|$tabMode|$updatedAt|${if (isCustom) customImgFile.lastModified() else 0L}"
                 if (!force && signature == lastLoadedSignature) return
+
+                renderer?.activeTabMode = tabMode
 
                 val customConfig = if (!configStr.isNullOrEmpty()) {
                     com.example.spatial.data.SpatialSceneConfig.fromJson(configStr)
@@ -169,6 +186,7 @@ class SpatialWallpaperService : WallpaperService() {
 
             init {
                 setEGLContextClientVersion(2)
+                preserveEGLContextOnPause = true
                 renderer?.let { setRenderer(it) }
                 renderMode = RENDERMODE_CONTINUOUSLY
             }

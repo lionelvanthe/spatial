@@ -1,22 +1,21 @@
 # Bàn giao hiện tại
 
 - Ngày: 2026-11-24 (Asia/Saigon).
-- Phạm vi: `SHAKE-116` (`done`) — Đồng bộ hoàn toàn Tab thứ 2 (**Shake / Jelly**) cả vật lý lò xo-khối lượng-giảm chấn, tương tác kéo-thả tay, gia tốc lắc và UI bảng chỉnh theo `Photos 3D 1.1.6`.
+- Phạm vi: `WALLPAPER-116` (`done`) — Đồng bộ toàn bộ luồng Apply Live Wallpaper theo `Photos 3D 1.1.6` (`sk0.z`, `ImageViewActivity.onClick(Q0)`, `tv1`, `h41`, `rv1.n`).
 - Thực hiện:
-  - **Vật lý Native C++ (`SpatialModelEngine.h/.cpp`, `jni_bridge.cpp`, `SpatialModelBridge.kt`)**:
-    - Tái tạo đúng công thức `ImageDynamicModel::reSetupNodes` (`0x25d04`), `reSetupSprings` (`0x25c60`) và `performUpdateStep` (`0x25468`): `mass = 20 + 10*|sd|`, `kStab = 8.0 + 1.5*(1 - |sd|)`, `kStruct = 3.0 + 1.5*(1 - |cdA - cdB|)`, damping `0.85^h` (chuẩn hóa từ bước 30Hz), neo về `basePos`, bỏ `zoomDeltaZ` khỏi Tab 2.
-    - Cập nhật `updateShake(dt, dragX, dragY, isTouching)`: khi đang chạm tay dịch trực tiếp đỉnh theo `(cd - shakeCenter)` giống `updateDynamicNative` (`0x28a2c`); khi thả tay lập tức bung lò xo bật nảy thạch.
-    - Cập nhật `applyImpulse`: dùng trọng số có dấu `1.45 * internalIntensity * (cd - shakeCenter)` giúp tiền cảnh & hậu cảnh lắc ngược chiều nhau quanh mặt phẳng `depthCenter`.
-  - **Renderer & Sensor (`SpatialGLRenderer.kt`)**:
-    - Bỏ nạp góc nghiêng tĩnh (gyro) vào Tab 2; chỉ nạp gia tốc lắc thực `onLinearAcceleration` khi không chạm tay và reset `touchDragX/Y` ngay tại `onTouchUp` để bung lò xo tức thì.
-  - **UI & Tests (`MainScreen.kt`, `ZoomControlsTest.kt`)**:
-    - Bảng chỉnh Tab 2 chỉ hiển thị `Cường độ` và `Trung tâm` (ẩn `Zoom`, `Zoom 3D`, `Độ đàn hồi`) khớp `ImageViewActivity.O()` và ảnh chụp thực tế `Photos 3D 1.1.6`.
-    - `MainScreen.kt`: Giữ tự động disable `Zoom 3D` khi `|zoom| < 0.1f` ở Tab 0 và Tab 2 (Animations).
-    - `ZoomControlsTest.kt`: Cập nhật `tab2MatchesPhotos3DShakeControls` xác minh đúng bộ điều khiển từng tab.
+  - **FILL toàn màn hình & căn tâm Wallpaper (`app/src/main/java/com/example/spatial/gl/SpatialGLRenderer.kt`)**:
+    - Thêm `isWallpaperFillMode`, `isWallpaperFramingTouchMode`, `onWallpaperTargetChanged`: khi đặt/xem trước Wallpaper sẽ scale theo FILL (`maxOf`) + overscan `1.075×` và dịch chuyển theo `wallTargetX`/`wallTargetY` kẹp chặt trong biên dư (tuyệt đối không lộ viền đen).
+  - **Wallpaper Service (`app/src/main/java/com/example/spatial/wallpaper/SpatialWallpaperService.kt`)**:
+    - Bật `isWallpaperFillMode = true` và `preserveEGLContextOnPause = true`.
+    - Đọc `wallpaper_tab_mode` (`0 = Rotate`, `1 = Shake`, `2 = Animations`) và `wallpaper_updated_at` để áp đúng chế độ người dùng chọn và reload tức thì khi đặt ảnh mới.
+    - Nối thêm `onLinearAcceleration` cho chế độ Shake trên màn hình chính.
+  - **Lưu đồng bộ & Chế độ căn chỉnh Wallpaper (`SpatialViewModel.kt`, `MainScreen.kt`)**:
+    - Đổi `persistCurrentSceneForWallpaper` sang `suspend` dùng `commit()` trên `Dispatchers.IO`, chờ ghi xong hoàn toàn ảnh/depth/config/mode rồi mới mở `ACTION_CHANGE_LIVE_WALLPAPER` (hết lỗi race condition hiện ảnh cũ hoặc `alpine`).
+    - Bấm nút Wallpaper trên toolbar mở chế độ **Căn chỉnh hình nền** toàn màn hình (kéo pan chọn vùng hiển thị) cùng nút nổi **FAB "Đặt hình nền"** (`viewer_confirm_wallpaper_fab`) và hỗ trợ `BackHandler`.
 - Kết quả kiểm tra:
   - `git diff --check`: **PASS**.
-  - `./scripts/harness.ps1 -Mode Verify`: **PASS** (`.harness/runs/20261124T051053613Z-9a353683/result.json`) — `:app:testDebugUnitTest`, `:app:lintDebug`, CMake C++ (`arm64-v8a`, `armeabi-v7a`, `x86_64`), `:app:assembleDebug` đều `BUILD SUCCESSFUL`.
-  - `./scripts/harness.ps1 -Mode Device` trên thiết bị thật `JSN-L22` (Android 10): **PASS** (`.harness/runs/20261124T051218898Z-b11a5406/result.json`) — `11/11` `connectedDebugAndroidTest` PASS (`0 failed`, `0 errors`, `0 skipped`).
+  - `./scripts/harness.ps1 -Mode Verify`: **PASS** (`.harness/runs/20261124T053218083Z-f312338e/result.json`) — `:app:testDebugUnitTest`, `:app:lintDebug`, CMake C++ (`arm64-v8a`, `armeabi-v7a`, `x86_64`), `:app:assembleDebug` đều `BUILD SUCCESSFUL`.
+  - `./scripts/harness.ps1 -Mode Device` trên thiết bị thật `JSN-L22` (Android 10): **PASS** (`.harness/runs/20261124T053448368Z-44061890/result.json`) — `11/11` `connectedDebugAndroidTest` PASS (`0 failed`, `0 errors`, `0 skipped`).
 - Chưa xác minh / Bước tiếp theo:
-  - Chưa commit các thay đổi mới sau commit `e821b77` (disable `Zoom 3D` + đồng bộ `SHAKE-116`).
-  - Chưa kiểm tra cảm giác lắc vật lý bằng tay trên thiết bị thật, Live Wallpaper (`WALLPAPER-001`) và mở xem file GIF trong Thư viện ảnh.
+  - Chưa commit các thay đổi của `WALLPAPER-116` sau commit `4278044`.
+  - Chưa xác minh thủ công trực quan ngoài màn hình chính sau khi bấm "Đặt hình nền" trên thiết bị thật (`WALLPAPER-001`).

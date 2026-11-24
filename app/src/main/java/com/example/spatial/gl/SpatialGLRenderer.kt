@@ -81,6 +81,17 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
             }
         }
 
+    // True for Live Wallpaper service and Wallpaper framing preview (FILL screen + wallTargetX/Y pan)
+    @Volatile
+    var isWallpaperFillMode = false
+
+    // True while user is interactively panning the wallpaper framing preview (adjusts wallTargetX/Y)
+    @Volatile
+    var isWallpaperFramingTouchMode = false
+
+    @Volatile
+    var onWallpaperTargetChanged: ((Float, Float) -> Unit)? = null
+
     @Volatile
     private var pendingPhysicsReset = false
     @Volatile
@@ -177,7 +188,13 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     }
 
     fun onTouchMove(dx: Float, dy: Float, @Suppress("UNUSED_PARAMETER") x: Float, @Suppress("UNUSED_PARAMETER") y: Float) {
-        if (activeTabMode == 3) {
+        if (isWallpaperFramingTouchMode) {
+            // Dragging right moves image right -> targetX decreases; dragging down moves image down -> targetY decreases.
+            val nextX = (sceneConfig.wallTargetX - dx * 0.85f).coerceIn(0.0f, 1.0f)
+            val nextY = (sceneConfig.wallTargetY - dy * 0.85f).coerceIn(0.0f, 1.0f)
+            sceneConfig = sceneConfig.copy(wallTargetX = nextX, wallTargetY = nextY)
+            onWallpaperTargetChanged?.invoke(nextX, nextY)
+        } else if (activeTabMode == 3) {
             val effectiveZoom = (sceneConfig.zoom + touchZoom).coerceIn(MotionLimits.MIN_ZOOM, MotionLimits.MAX_ZOOM)
             val maxPan = (effectiveZoom.coerceAtLeast(0.0f) * 0.65f).coerceIn(0.0f, 0.75f)
             touchPanX = (touchPanX + dx * 2.0f).coerceIn(-maxPan, maxPan)
@@ -349,16 +366,32 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
 
         val viewAspect = viewportWidth.toFloat() / viewportHeight.toFloat()
         val imageAspect = activeBitmapWidth.toFloat() / activeBitmapHeight.toFloat()
-        // Match Photos 3D 1.1.6 ik0.t/ik0.n border margin (~7.5% overscan) so negative zoom (-1.0)
-        // never shrinks inside the viewport or exposes black bars / uneven depth edges.
-        val baseFitScale = if (viewAspect <= 1.0f) {
-            if (imageAspect > viewAspect) (viewAspect * 3.5f) / imageAspect else 3.5f
+        val frustumHalfW = if (viewAspect <= 1.0f) viewAspect * 3.5f else 3.5f
+        val frustumHalfH = if (viewAspect <= 1.0f) 3.5f else 3.5f / viewAspect
+        // Match Photos 3D 1.1.6:
+        // - Viewer (ik0.n): FIT image into viewport + 7.5% border overscan.
+        // - Live Wallpaper & Wallpaper Framing (rv1.n): FILL full screen + wallTargetX/Y offset clamped to border.
+        val baseScale = if (isWallpaperFillMode) {
+            maxOf(frustumHalfW / imageAspect, frustumHalfH)
         } else {
-            if (imageAspect > viewAspect) 3.5f / imageAspect else 3.5f / viewAspect
+            minOf(frustumHalfW / imageAspect, frustumHalfH)
         }
-        val fitScale = baseFitScale * 1.075f
+        val fitScale = baseScale * 1.075f
+        val offsetX: Float
+        val offsetY: Float
+        if (isWallpaperFillMode) {
+            val maxOffsetX = (baseScale * imageAspect - frustumHalfW).coerceAtLeast(0.0f)
+            val maxOffsetY = (baseScale - frustumHalfH).coerceAtLeast(0.0f)
+            val tx = cfg.wallTargetX.coerceIn(0.0f, 1.0f)
+            val ty = cfg.wallTargetY.coerceIn(0.0f, 1.0f)
+            offsetX = ((0.5f - tx) * 2.0f * maxOffsetX).coerceIn(-maxOffsetX, maxOffsetX)
+            offsetY = ((ty - 0.5f) * 2.0f * maxOffsetY).coerceIn(-maxOffsetY, maxOffsetY)
+        } else {
+            offsetX = 0.0f
+            offsetY = 0.0f
+        }
         Matrix.setIdentityM(modelMatrix, 0)
-        Matrix.translateM(modelMatrix, 0, 0f, 0f, -7.0f)
+        Matrix.translateM(modelMatrix, 0, offsetX, offsetY, -7.0f)
         Matrix.scaleM(modelMatrix, 0, fitScale, fitScale, fitScale)
         when (tabMode) {
             0 -> {

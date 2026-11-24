@@ -590,6 +590,28 @@
         "2026-11-24: MainScreen.kt & ZoomControlsTest.kt: bảng chỉnh Tab 2 chỉ hiển thị Cường độ và Trung tâm (ẩn Zoom, Zoom 3D, Độ đàn hồi) khớp ImageViewActivity.O() của Photos 3D 1.1.6.",
         "2026-11-24: git diff --check PASS. harness.ps1 -Mode Verify PASS (.harness/runs/20261124T051053613Z-9a353683/result.json): testDebugUnitTest, lintDebug, CMake C++ 3 ABI, assembleDebug. harness.ps1 -Mode Device PASS trên JSN-L22 (.harness/runs/20261124T051218898Z-b11a5406/result.json): 11/11 connectedDebugAndroidTest PASS."
       ]
+    },
+    {
+      "id": "WALLPAPER-116",
+      "title": "Đồng bộ luồng Apply Live Wallpaper theo Photos 3D 1.1.6 (căn chỉnh khung FILL, lưu đồng bộ trước khi mở picker, giữ đúng mode/sensor)",
+      "status": "done",
+      "depends_on": [
+        "SHAKE-116"
+      ],
+      "acceptance": [
+        "SpatialGLRenderer hỗ trợ isWallpaperFillMode (FILL toàn màn hình + overscan 1.075x + căn tâm wallTargetX/Y có kẹp biên không lộ viền đen như rv1.n())",
+        "SpatialViewModel lưu xong đồng bộ (commit + file ảnh/depth + wallpaper_tab_mode + wallpaper_updated_at) trên IO trước khi mở ACTION_CHANGE_LIVE_WALLPAPER, triệt tiêu race condition hiện ảnh cũ",
+        "SpatialWallpaperService bật isWallpaperFillMode=true, preserveEGLContextOnPause=true, áp đúng activeTabMode (Rotate/Shake/Animations) và nối onLinearAcceleration cho Shake",
+        "MainScreen thêm chế độ căn chỉnh Wallpaper (kéo pan chọn vùng hiển thị + FAB Đặt hình nền) khớp sk0.z()/ImageViewActivity.onClick(Q0) của Photos 3D 1.1.6",
+        "Chạy Verify và Device trên JSN-L22 pass"
+      ],
+      "evidence": [
+        "2026-11-24: Đối chiếu Photos 3D 1.1.6 (ImageViewActivity.onOptionsItemSelected/onClick, sk0.z, tv1.onPostExecute, h41.onCreate/l, rv1.n): phát hiện Spatial trước đó chạy persistCurrentSceneForWallpaper bất đồng bộ song song với startActivity (gây race condition hiện ảnh cũ/alpine), WallpaperService chỉ dùng FIT (lộ viền đen trên/dưới) và luôn cố định Tab 0 Rotate không nối onLinearAcceleration, và thiếu bước căn chỉnh khung hình nền + FAB xác nhận.",
+        "2026-11-24: SpatialGLRenderer.kt: thêm isWallpaperFillMode (FILL toàn màn hình + overscan 1.075x + offset wallTargetX/Y kẹp trong biên dư không lộ viền đen như rv1.n()), isWallpaperFramingTouchMode và callback onWallpaperTargetChanged.",
+        "2026-11-24: SpatialWallpaperService.kt: bật isWallpaperFillMode=true, preserveEGLContextOnPause=true, đọc wallpaper_tab_mode/wallpaper_updated_at để giữ đúng chế độ Rotate/Shake/Animations và reload tức thì khi đổi ảnh, nối thêm onLinearAcceleration cho chế độ Shake.",
+        "2026-11-24: SpatialViewModel.kt & MainScreen.kt: đổi persistCurrentSceneForWallpaper thành suspend dùng commit() ghi xong ảnh/depth/config/mode trên Dispatchers.IO trước khi mở ACTION_CHANGE_LIVE_WALLPAPER; bổ sung chế độ căn chỉnh hình nền toàn màn hình (kéo pan chọn vị trí + BackHandler + ExtendedFloatingActionButton Đặt hình nền).",
+        "2026-11-24: git diff --check PASS. harness.ps1 -Mode Verify PASS (.harness/runs/20261124T053218083Z-f312338e/result.json): testDebugUnitTest, lintDebug, CMake C++ 3 ABI, assembleDebug. harness.ps1 -Mode Device PASS trên JSN-L22 (.harness/runs/20261124T053448368Z-44061890/result.json): 11/11 connectedDebugAndroidTest PASS."
+      ]
     }
   ]
 }

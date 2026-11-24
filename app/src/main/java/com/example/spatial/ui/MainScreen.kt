@@ -154,6 +154,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
     val processProgress by viewModel.processProgress.collectAsState()
     val isExporting by viewModel.isExporting.collectAsState()
     val exportProgress by viewModel.exportProgress.collectAsState()
+    val isApplyingWallpaper by viewModel.isApplyingWallpaper.collectAsState()
     LaunchedEffect(viewModel) {
         viewModel.exportEvents.collect { event ->
             when (event) {
@@ -188,6 +189,7 @@ fun MainScreen(viewModel: SpatialViewModel) {
     var bottomBarHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     var showControls by remember { mutableStateOf(false) }
+    var isWallpaperFramingMode by remember { mutableStateOf(false) }
     var awaitingImportedScene by remember { mutableStateOf(false) }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -199,7 +201,9 @@ fun MainScreen(viewModel: SpatialViewModel) {
 
     // Handle back button when in viewer (matches rk0.x() in sample app)
     BackHandler(enabled = screenMode == ScreenMode.VIEWER) {
-        if (showControls) {
+        if (isWallpaperFramingMode) {
+            isWallpaperFramingMode = false
+        } else if (showControls) {
             showControls = false
         } else {
             screenMode = ScreenMode.GALLERY
@@ -317,18 +321,19 @@ fun MainScreen(viewModel: SpatialViewModel) {
             .fillMaxSize()
             .background(Color(0xFF0F1018))
     ) {
-        // Fit the actual GL surface to the photo inside the space between the bars.
+        // Fit the actual GL surface to the photo inside the space between the bars,
+        // or expand to full-screen FILL preview when adjusting Live Wallpaper framing (Photos 3D sk0.z).
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(
-                    top = with(density) { if (screenMode == ScreenMode.VIEWER) toolbarHeightPx.toDp() else 0.dp },
-                    bottom = with(density) { if (screenMode == ScreenMode.VIEWER) bottomBarHeightPx.toDp() else 0.dp }
+                    top = with(density) { if (screenMode == ScreenMode.VIEWER && !isWallpaperFramingMode) toolbarHeightPx.toDp() else 0.dp },
+                    bottom = with(density) { if (screenMode == ScreenMode.VIEWER && !isWallpaperFramingMode) bottomBarHeightPx.toDp() else 0.dp }
                 ),
             contentAlignment = Alignment.Center
         ) {
             val image = currentScene?.fullImageBitmap
-            val viewportModifier = if (screenMode == ScreenMode.VIEWER && image != null) {
+            val viewportModifier = if (screenMode == ScreenMode.VIEWER && !isWallpaperFramingMode && image != null) {
                 Modifier.aspectRatio(image.width.coerceAtLeast(1).toFloat() / image.height.coerceAtLeast(1).toFloat())
             } else {
                 Modifier.fillMaxSize()
@@ -340,9 +345,12 @@ fun MainScreen(viewModel: SpatialViewModel) {
                         surfaceViewRef.value = view
                         view.renderer.onSceneDrawn = { bitmap -> view.post { drawnBitmap = bitmap } }
                         view.renderer.activeTabMode = selectedBottomTab
+                        view.renderer.isWallpaperFillMode = isWallpaperFramingMode
+                        view.renderer.isWallpaperFramingTouchMode = isWallpaperFramingMode
+                        view.renderer.onWallpaperTargetChanged = { x, y -> view.post { viewModel.updateWallTarget(x, y) } }
                         // Framing is scene configuration, shared with wallpaper and video export.
                         view.onTapListener = {
-                            if (screenMode == ScreenMode.VIEWER) {
+                            if (screenMode == ScreenMode.VIEWER && !isWallpaperFramingMode) {
                                 showControls = !showControls
                             }
                         }
@@ -354,8 +362,11 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 update = { view ->
                     surfaceViewRef.value = view
                     view.renderer.activeTabMode = selectedBottomTab
+                    view.renderer.isWallpaperFillMode = isWallpaperFramingMode
+                    view.renderer.isWallpaperFramingTouchMode = isWallpaperFramingMode
+                    view.renderer.onWallpaperTargetChanged = { x, y -> view.post { viewModel.updateWallTarget(x, y) } }
                     view.onTapListener = {
-                        if (screenMode == ScreenMode.VIEWER) {
+                        if (screenMode == ScreenMode.VIEWER && !isWallpaperFramingMode) {
                             showControls = !showControls
                         }
                     }
@@ -485,6 +496,8 @@ fun MainScreen(viewModel: SpatialViewModel) {
                 hasTiltSensor = hasTiltSensor,
                 selectedBottomTab = selectedBottomTab,
                 showControls = showControls,
+                isWallpaperFramingMode = isWallpaperFramingMode,
+                isApplyingWallpaper = isApplyingWallpaper,
                 onToolbarHeightChanged = { toolbarHeightPx = it },
                 onBottomBarHeightChanged = { bottomBarHeightPx = it },
                 onSelectBottomTab = { index ->
@@ -498,7 +511,13 @@ fun MainScreen(viewModel: SpatialViewModel) {
                     }
                 },
                 onToggleControls = { showControls = !showControls },
-                onBackToGallery = { screenMode = ScreenMode.GALLERY },
+                onBackToGallery = {
+                    if (isWallpaperFramingMode) {
+                        isWallpaperFramingMode = false
+                    } else {
+                        screenMode = ScreenMode.GALLERY
+                    }
+                },
                 onToggleSensor = { viewModel.toggleSensor() },
                 onSelectPattern = { viewModel.updatePattern(it) },
                 onUpdateSpeed = { viewModel.updateSpeed(it) },
@@ -523,7 +542,15 @@ fun MainScreen(viewModel: SpatialViewModel) {
                         Toast.makeText(context, "Đã đặt lại thông số mặc định", Toast.LENGTH_SHORT).show()
                     }
                 },
-                onSetWallpaper = { viewModel.launchSetLiveWallpaperIntent() },
+                onSetWallpaper = {
+                    showControls = false
+                    isWallpaperFramingMode = true
+                },
+                onConfirmWallpaper = {
+                    viewModel.launchSetLiveWallpaperIntent(activeTabMode = selectedBottomTab) {
+                        isWallpaperFramingMode = false
+                    }
+                },
                 onSave = { pendingExportShare = false },
                 onShare = { pendingExportShare = true }
             )
@@ -1011,6 +1038,8 @@ fun ViewerScreen(
     hasTiltSensor: Boolean = true,
     selectedBottomTab: Int,
     showControls: Boolean,
+    isWallpaperFramingMode: Boolean = false,
+    isApplyingWallpaper: Boolean = false,
     onSelectBottomTab: (Int) -> Unit,
     onToggleControls: () -> Unit,
     onBackToGallery: () -> Unit,
@@ -1025,6 +1054,7 @@ fun ViewerScreen(
     onUpdateInverted: (Boolean) -> Unit,
     onDeleteOrReset: () -> Unit,
     onSetWallpaper: () -> Unit,
+    onConfirmWallpaper: () -> Unit = onSetWallpaper,
     onSave: () -> Unit,
     onShare: () -> Unit,
     onToolbarHeightChanged: (Int) -> Unit,
@@ -1064,67 +1094,85 @@ fun ViewerScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.weight(1f))
-
-                // Actions on the right
-                if (selectedBottomTab != 3) {
-                    // Wallpaper
-                    IconButton(onClick = onSetWallpaper) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_wallpaper_phone),
-                            contentDescription = "Set Wallpaper",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp)
+                if (isWallpaperFramingMode) {
+                    Column(modifier = Modifier.padding(start = 6.dp)) {
+                        Text(
+                            text = "Căn chỉnh hình nền",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
                         )
-                    }
-
-                    // Download / Save (Shown ONLY in Tab 2 Animations)
-                    if (selectedBottomTab == 2) {
-                        IconButton(onClick = onSave) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_save_real),
-                                contentDescription = "Save",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        // Share (Shown ONLY in Tab 2 Animations)
-                        IconButton(onClick = onShare) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_share_real),
-                                contentDescription = "Share",
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-
-                    // Tune / Properties Sliders Toggle Icon
-                    IconButton(onClick = onToggleControls) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_properties),
-                            contentDescription = "Tune",
-                            tint = if (showControls) Color(0xFF00A0E9) else Color.White,
-                            modifier = Modifier.size(24.dp)
+                        Text(
+                            text = "Kéo ảnh để chọn vùng hiển thị",
+                            color = Color.White.copy(alpha = 0.72f),
+                            fontSize = 11.sp
                         )
                     }
                 }
 
-                // Delete custom photo or reset parameters for preset scene
-                IconButton(onClick = onDeleteOrReset) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_delete_real),
-                        contentDescription = if (scene?.isCustom == true) "Delete" else "Reset",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
+                Spacer(modifier = Modifier.weight(1f))
+
+                if (!isWallpaperFramingMode) {
+                    // Actions on the right
+                    if (selectedBottomTab != 3) {
+                        // Wallpaper
+                        IconButton(onClick = onSetWallpaper) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_wallpaper_phone),
+                                contentDescription = "Set Wallpaper",
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        // Download / Save (Shown ONLY in Tab 2 Animations)
+                        if (selectedBottomTab == 2) {
+                            IconButton(onClick = onSave) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_save_real),
+                                    contentDescription = "Save",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            // Share (Shown ONLY in Tab 2 Animations)
+                            IconButton(onClick = onShare) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_share_real),
+                                    contentDescription = "Share",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        // Tune / Properties Sliders Toggle Icon
+                        IconButton(onClick = onToggleControls) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_properties),
+                                contentDescription = "Tune",
+                                tint = if (showControls) Color(0xFF00A0E9) else Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+
+                    // Delete custom photo or reset parameters for preset scene
+                    IconButton(onClick = onDeleteOrReset) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_delete_real),
+                            contentDescription = if (scene?.isCustom == true) "Delete" else "Reset",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
 
             // TOP SLIDERS OVERLAY PANEL (view_image_controls clone)
             AnimatedVisibility(
-                visible = showControls,
+                visible = showControls && !isWallpaperFramingMode,
                 enter = fadeIn() + slideInVertically { -it },
                 exit = fadeOut() + slideOutVertically { -it }
             ) {
@@ -1351,7 +1399,44 @@ fun ViewerScreen(
             }
         }
 
+        // WALLPAPER FRAMING CONFIRM FAB (Photos 3D activity_image_view_set_wallpaper_floating_button)
+        AnimatedVisibility(
+            visible = isWallpaperFramingMode,
+            enter = fadeIn() + slideInVertically { it },
+            exit = fadeOut() + slideOutVertically { it },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(20.dp)
+        ) {
+            androidx.compose.material3.ExtendedFloatingActionButton(
+                onClick = { if (!isApplyingWallpaper) onConfirmWallpaper() },
+                containerColor = Color(0xFF00A0E9),
+                contentColor = Color.White,
+                modifier = Modifier.testTag("viewer_confirm_wallpaper_fab")
+            ) {
+                if (isApplyingWallpaper) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text("Đang chuẩn bị...", fontWeight = FontWeight.SemiBold)
+                } else {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_wallpaper_phone),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Đặt hình nền", fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+
         // BOTTOM CONTAINER: Motion Patterns Bar + Bottom Navigation Bar
+        if (!isWallpaperFramingMode) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1477,6 +1562,7 @@ fun ViewerScreen(
                     }
                 }
             }
+        }
         }
     }
 }

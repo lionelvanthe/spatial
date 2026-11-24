@@ -79,6 +79,9 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
     private val _isExporting = MutableStateFlow(false)
     val isExporting: StateFlow<Boolean> = _isExporting.asStateFlow()
 
+    private val _isApplyingWallpaper = MutableStateFlow(false)
+    val isApplyingWallpaper: StateFlow<Boolean> = _isApplyingWallpaper.asStateFlow()
+
     private val _exportProgress = MutableStateFlow(0.0f)
     val exportProgress: StateFlow<Float> = _exportProgress.asStateFlow()
 
@@ -125,16 +128,22 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun persistCurrentSceneForWallpaper(item: SpatialSceneItem, config: SpatialSceneConfig) {
-        viewModelScope.launch(Dispatchers.IO) {
+    private suspend fun persistCurrentSceneForWallpaper(
+        item: SpatialSceneItem,
+        config: SpatialSceneConfig,
+        activeTabMode: Int
+    ) {
+        withContext(Dispatchers.IO) {
             val app = getApplication<Application>()
             val prefs = app.getSharedPreferences("spatial_wallpaper_prefs", android.content.Context.MODE_PRIVATE)
+            val safeTabMode = if (activeTabMode in 0..2) activeTabMode else 0
+            val updatedAt = System.currentTimeMillis()
             if (item.isCustom) {
                 try {
                     val imgFile = java.io.File(app.filesDir, "custom_wallpaper.jpg")
                     item.fullImageBitmap?.let { bmp ->
                         java.io.FileOutputStream(imgFile).use { out ->
-                            bmp.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                            bmp.compress(Bitmap.CompressFormat.JPEG, 95, out)
                         }
                     }
                     val depthFile = java.io.File(app.filesDir, "custom_depth.bin")
@@ -148,7 +157,9 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                         .putInt("wallpaper_depth_width", item.depthWidth)
                         .putInt("wallpaper_depth_height", item.depthHeight)
                         .putString("wallpaper_config", config.toJson())
-                        .apply()
+                        .putInt("wallpaper_tab_mode", safeTabMode)
+                        .putLong("wallpaper_updated_at", updatedAt)
+                        .commit()
                 } catch (e: Exception) {
                     Log.e("SpatialViewModel", "Failed persisting custom wallpaper", e)
                 }
@@ -157,9 +168,18 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
                     .putBoolean("wallpaper_is_custom", false)
                     .putString("wallpaper_scene_id", item.id)
                     .putString("wallpaper_config", config.toJson())
-                    .apply()
+                    .putInt("wallpaper_tab_mode", safeTabMode)
+                    .putLong("wallpaper_updated_at", updatedAt)
+                    .commit()
             }
         }
+    }
+
+    fun updateWallTarget(x: Float, y: Float) {
+        _currentConfig.value = _currentConfig.value.copy(
+            wallTargetX = x.coerceIn(0.0f, 1.0f),
+            wallTargetY = y.coerceIn(0.0f, 1.0f)
+        ).sanitized()
     }
 
     fun updateIntensity(intensity: Float) {
@@ -438,11 +458,25 @@ class SpatialViewModel(application: Application) : AndroidViewModel(application)
         return target.absolutePath
     }
 
-    fun launchSetLiveWallpaperIntent() {
+    fun launchSetLiveWallpaperIntent(activeTabMode: Int = 0, onPrepared: () -> Unit = {}) {
+        if (_isApplyingWallpaper.value) return
         val current = _currentScene.value
-        if (current != null) {
-            persistCurrentSceneForWallpaper(current, _currentConfig.value)
+        val config = _currentConfig.value
+        viewModelScope.launch {
+            _isApplyingWallpaper.value = true
+            try {
+                if (current != null) {
+                    persistCurrentSceneForWallpaper(current, config, activeTabMode)
+                }
+                onPrepared()
+                startLiveWallpaperPicker()
+            } finally {
+                _isApplyingWallpaper.value = false
+            }
         }
+    }
+
+    private fun startLiveWallpaperPicker() {
         val app = getApplication<Application>()
         try {
             val intent = Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).apply {
