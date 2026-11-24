@@ -1,22 +1,22 @@
 # Bàn giao hiện tại
 
-- Ngày: 2026-11-23 (Asia/Saigon).
-- Phạm vi: `ZOOM-116` (`done`) — Đồng bộ hoàn toàn dải SeekBar `Zoom`, overscan biên và biên độ phóng đại/nhịp thở theo trải nghiệm trực tiếp song song `Photos 3D 1.1.6` và `Spatial` trên thiết bị thật `JSN-L22`.
+- Ngày: 2026-11-24 (Asia/Saigon).
+- Phạm vi: `SHAKE-116` (`done`) — Đồng bộ hoàn toàn Tab thứ 2 (**Shake / Jelly**) cả vật lý lò xo-khối lượng-giảm chấn, tương tác kéo-thả tay, gia tốc lắc và UI bảng chỉnh theo `Photos 3D 1.1.6`.
 - Thực hiện:
-  - **Dải giá trị Zoom (`app/src/main/java/com/example/spatial/data/SpatialSceneConfig.kt`)**:
-    - Đổi `MotionLimits.MIN_ZOOM = -1.0f`, `MotionLimits.MAX_ZOOM = 1.0f` khớp `activity_image_view_zoom_property_slider` (`-1..1`) và các file `_desc.dat` mẫu.
-  - **Overscan biên khớp `ik0.t`/`ik0.n` (`SpatialGLRenderer.kt`, `VideoExporter.kt`, `GifExporter.kt`)**:
-    - Nhân `fitScale` với `1.075f` đồng bộ cho Live Preview, Live Wallpaper, MP4 Export và GIF Export để khớp vùng dự phòng biên `0.05` của `Photos 3D 1.1.6`, triệt tiêu hoàn toàn viền đen 4 cạnh và mép uốn lượn theo depth khi kéo Zoom âm về `-1.0`.
-  - **Biên độ Zoom & Nhịp thở (`SpatialModelEngine.cpp`, `SpatialGLRenderer.kt`)**:
-    - Chuẩn hóa hệ số `zoomDeltaZ` về `0.26f` (cho biên độ phóng `+16.2%` ở `zoom = +1.0` và thu `-6.5%` ở `zoom = -1.0`, luôn nằm gọn trong overscan `1.075×` và khớp trực quan `Photos 3D 1.1.6`).
-    - Áp nhịp thở `0.5f * (1 - cos(2π·p))` (0 → 1 → 0) đồng bộ cho cả Tab Rotate (bỏ nền zoom tĩnh `45%`) lẫn Tab Animations/Export (`updateAnimated`).
-  - **Tests (`MotionLimitsTest.kt`, `ZoomExportTest.kt`)**:
-    - `MotionLimitsTest.kt`: Bổ sung `bundledSceneZoomsArePreservedOnPhotos3DScale`.
-    - `ZoomExportTest.kt`: Lấy mẫu frame giữa chu kỳ (`duration / 2`) để xác minh đỉnh phóng/thu của `MIN_ZOOM` vs `MAX_ZOOM`.
+  - **Vật lý Native C++ (`SpatialModelEngine.h/.cpp`, `jni_bridge.cpp`, `SpatialModelBridge.kt`)**:
+    - Tái tạo đúng công thức `ImageDynamicModel::reSetupNodes` (`0x25d04`), `reSetupSprings` (`0x25c60`) và `performUpdateStep` (`0x25468`): `mass = 20 + 10*|sd|`, `kStab = 8.0 + 1.5*(1 - |sd|)`, `kStruct = 3.0 + 1.5*(1 - |cdA - cdB|)`, damping `0.85^h` (chuẩn hóa từ bước 30Hz), neo về `basePos`, bỏ `zoomDeltaZ` khỏi Tab 2.
+    - Cập nhật `updateShake(dt, dragX, dragY, isTouching)`: khi đang chạm tay dịch trực tiếp đỉnh theo `(cd - shakeCenter)` giống `updateDynamicNative` (`0x28a2c`); khi thả tay lập tức bung lò xo bật nảy thạch.
+    - Cập nhật `applyImpulse`: dùng trọng số có dấu `1.45 * internalIntensity * (cd - shakeCenter)` giúp tiền cảnh & hậu cảnh lắc ngược chiều nhau quanh mặt phẳng `depthCenter`.
+  - **Renderer & Sensor (`SpatialGLRenderer.kt`)**:
+    - Bỏ nạp góc nghiêng tĩnh (gyro) vào Tab 2; chỉ nạp gia tốc lắc thực `onLinearAcceleration` khi không chạm tay và reset `touchDragX/Y` ngay tại `onTouchUp` để bung lò xo tức thì.
+  - **UI & Tests (`MainScreen.kt`, `ZoomControlsTest.kt`)**:
+    - Bảng chỉnh Tab 2 chỉ hiển thị `Cường độ` và `Trung tâm` (ẩn `Zoom`, `Zoom 3D`, `Độ đàn hồi`) khớp `ImageViewActivity.O()` và ảnh chụp thực tế `Photos 3D 1.1.6`.
+    - `MainScreen.kt`: Giữ tự động disable `Zoom 3D` khi `|zoom| < 0.1f` ở Tab 0 và Tab 2 (Animations).
+    - `ZoomControlsTest.kt`: Cập nhật `tab2MatchesPhotos3DShakeControls` xác minh đúng bộ điều khiển từng tab.
 - Kết quả kiểm tra:
   - `git diff --check`: **PASS**.
-  - `./scripts/harness.ps1 -Mode Verify`: **PASS** (`.harness/runs/20261123T135624507Z-a92a7871/result.json`) — `:app:testDebugUnitTest`, `:app:lintDebug`, CMake C++ (`arm64-v8a`, `armeabi-v7a`, `x86_64`), `:app:assembleDebug` đều `BUILD SUCCESSFUL`.
-  - `./scripts/harness.ps1 -Mode Device` trên thiết bị thật `JSN-L22` (Android 10): **PASS** (`.harness/runs/20261123T135743338Z-af9a0aaa/result.json`) — `11/11` `connectedDebugAndroidTest` PASS (`0 failed`, `0 errors`, `0 skipped`).
-  - **Đối chiếu trực quan trên máy thật `JSN-L22`**: Đã mở và chụp song song `Photos 3D 1.1.6` và `Spatial` (bản mới đã cài lên máy) với cùng ảnh `Portrait Selfie` (`woman_selfie`) ở `Zoom = 0`, `+1.0`, `-1.0`: khung hình kín 100% không còn viền đen khi zoom âm, tỷ lệ crop mặc định và biên độ phóng/thu khớp `Photos 3D 1.1.6`.
+  - `./scripts/harness.ps1 -Mode Verify`: **PASS** (`.harness/runs/20261124T051053613Z-9a353683/result.json`) — `:app:testDebugUnitTest`, `:app:lintDebug`, CMake C++ (`arm64-v8a`, `armeabi-v7a`, `x86_64`), `:app:assembleDebug` đều `BUILD SUCCESSFUL`.
+  - `./scripts/harness.ps1 -Mode Device` trên thiết bị thật `JSN-L22` (Android 10): **PASS** (`.harness/runs/20261124T051218898Z-b11a5406/result.json`) — `11/11` `connectedDebugAndroidTest` PASS (`0 failed`, `0 errors`, `0 skipped`).
 - Chưa xác minh / Bước tiếp theo:
-  - Chưa kiểm tra thủ công trực quan Live Wallpaper ngoài màn hình chính (`WALLPAPER-001`) và mở xem file GIF xuất ra trong ứng dụng Thư viện ảnh.
+  - Chưa commit các thay đổi mới sau commit `e821b77` (disable `Zoom 3D` + đồng bộ `SHAKE-116`).
+  - Chưa kiểm tra cảm giác lắc vật lý bằng tay trên thiết bị thật, Live Wallpaper (`WALLPAPER-001`) và mở xem file GIF trong Thư viện ảnh.

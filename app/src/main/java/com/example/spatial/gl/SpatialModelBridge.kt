@@ -83,11 +83,11 @@ class SpatialModelBridge {
         return nativeUpdateRotate(handle, vb, tiltX, tiltY)
     }
 
-    fun updateShake(dt: Float, tiltX: Float, tiltY: Float) {
+    fun updateShake(dt: Float, dragX: Float, dragY: Float, isTouching: Boolean = false) {
         val vb = vertexBuffer ?: return
         if (handle == 0L) return
         vb.position(0)
-        nativeUpdateShake(handle, vb, dt, tiltX, tiltY)
+        nativeUpdateShake(handle, vb, dt, dragX, dragY, isTouching)
     }
 
     fun updateAnimated(progress: Float, patternId: Int): Boolean {
@@ -148,7 +148,14 @@ class SpatialModelBridge {
     )
 
     private external fun nativeUpdateRotate(handle: Long, vertexBuffer: FloatBuffer, tiltX: Float, tiltY: Float): Boolean
-    private external fun nativeUpdateShake(handle: Long, vertexBuffer: FloatBuffer, dt: Float, tiltX: Float, tiltY: Float)
+    private external fun nativeUpdateShake(
+        handle: Long,
+        vertexBuffer: FloatBuffer,
+        dt: Float,
+        dragX: Float,
+        dragY: Float,
+        isTouching: Boolean
+    )
     private external fun nativeUpdateAnimated(handle: Long, vertexBuffer: FloatBuffer, progress: Float, patternId: Int): Boolean
     private external fun nativeUpdateZoomPan(handle: Long, vertexBuffer: FloatBuffer, zoom: Float, panX: Float, panY: Float): Boolean
     private external fun nativeApplyImpulse(handle: Long, impulseX: Float, impulseY: Float)

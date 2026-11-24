@@ -140,15 +140,22 @@ Java_com_example_spatial_gl_SpatialModelBridge_nativeUpdateShake(
     jlong handle,
     jobject vertexBuffer,
     jfloat dt,
-    jfloat tiltX,
-    jfloat tiltY
+    jfloat dragX,
+    jfloat dragY,
+    jboolean isTouching
 ) {
     auto* engine = fromHandle(handle);
     if (!engine || !vertexBuffer) return;
     auto* dst = static_cast<float*>(env->GetDirectBufferAddress(vertexBuffer));
     const jlong needed = static_cast<jlong>(engine->getVertexCount()) * 5;
     if (!dst || needed <= 0 || env->GetDirectBufferCapacity(vertexBuffer) < needed) return;
-    engine->updateShake(dst, static_cast<float>(dt), static_cast<float>(tiltX), static_cast<float>(tiltY));
+    engine->updateShake(
+        dst,
+        static_cast<float>(dt),
+        static_cast<float>(dragX),
+        static_cast<float>(dragY),
+        isTouching == JNI_TRUE
+    );
 }
 
 JNIEXPORT jboolean JNICALL

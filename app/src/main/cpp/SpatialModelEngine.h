@@ -50,7 +50,7 @@ public:
     );
 
     bool updateRotate(float* outVertices, float tiltX, float tiltY);
-    void updateShake(float* outVertices, float dt, float tiltX, float tiltY);
+    void updateShake(float* outVertices, float dt, float dragX, float dragY, bool isTouching);
     bool updateAnimated(float* outVertices, float progress, int patternId);
     bool updateZoomPan(float* outVertices, float zoom, float panX, float panY);
 

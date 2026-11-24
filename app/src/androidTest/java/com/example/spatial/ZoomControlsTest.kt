@@ -1,5 +1,7 @@
 package com.example.spatial
 
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -43,11 +45,17 @@ class ZoomControlsTest {
             compose.waitForIdle()
         }
 
+        // Photos 3D 1.1.6: Zoom 3D is disabled when |zoom| < 0.1 and enabled when |zoom| >= 0.1.
+        compose.runOnUiThread { viewModel.updateZoom(0f) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).assertIsNotEnabled()
+
         drag("viewer_zoom", false)
         compose.runOnIdle { assertEquals(MotionLimits.MIN_ZOOM, viewModel.currentConfig.value.zoom, .001f) }
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).assertIsEnabled()
         drag("viewer_zoom", true)
         compose.runOnIdle { assertEquals(MotionLimits.MAX_ZOOM, viewModel.currentConfig.value.zoom, .001f) }
-        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).fetchSemanticsNode()
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).assertIsEnabled()
         compose.onNodeWithText("Zoom 3D:", useUnmergedTree = true).fetchSemanticsNode()
         drag("viewer_zoom_3d", true)
         compose.runOnIdle { assertEquals(MotionLimits.MAX_ZOOM_3D, viewModel.currentConfig.value.zoom3D, .01f) }
@@ -58,7 +66,7 @@ class ZoomControlsTest {
         compose.onNodeWithText("Zoom 3D:", useUnmergedTree = true).fetchSemanticsNode()
     }
 
-    @Test fun tab2HasElasticityZoomAndLookControls() {
+    @Test fun tab2MatchesPhotos3DShakeControls() {
         compose.onNodeWithContentDescription("Wallpapers").performClick()
         compose.waitUntil(10_000) {
             compose.onAllNodes(androidx.compose.ui.test.hasContentDescription("Cliffside Village"))
@@ -66,35 +74,22 @@ class ZoomControlsTest {
         }
         compose.onNodeWithContentDescription("Cliffside Village").performClick()
         compose.onNodeWithContentDescription("Tune").performClick()
-        val viewModel = ViewModelProvider(compose.activity)[SpatialViewModel::class.java]
 
-        fun drag(tag: String, toRight: Boolean) {
-            compose.onNodeWithTag(tag, useUnmergedTree = true).performTouchInput {
-                val left = Offset(1f, center.y)
-                val right = Offset(width - 1f, center.y)
-                swipe(center, if (toRight) right else left, 500)
-            }
-            compose.waitForIdle()
-        }
-
-        // Tab 0 (Rotate): Zoom exists, Elasticity does not
+        // Tab 0 (Rotate): Zoom & Zoom 3D exist
         compose.onNodeWithTag("viewer_zoom", useUnmergedTree = true).fetchSemanticsNode()
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).fetchSemanticsNode()
+
+        // Switch to Tab 1 (Shake): matches Photos 3D 1.1.6 — only Intensity & Center, no Zoom/Zoom 3D/Elasticity
+        compose.onNodeWithContentDescription("Shake").performClick()
+        compose.onNodeWithText("Cường độ:", useUnmergedTree = true).fetchSemanticsNode()
+        compose.onNodeWithText("Trung tâm:", useUnmergedTree = true).fetchSemanticsNode()
+        compose.onNodeWithTag("viewer_zoom", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithTag("viewer_elasticity", useUnmergedTree = true).assertDoesNotExist()
 
-        // Switch to Tab 1 (Shake):
-        compose.onNodeWithContentDescription("Shake").performClick()
-        compose.onNodeWithTag("viewer_zoom", useUnmergedTree = true).fetchSemanticsNode()
-        compose.onNodeWithTag("viewer_elasticity", useUnmergedTree = true).fetchSemanticsNode()
-        compose.onNodeWithText("Độ đàn hồi:", useUnmergedTree = true).fetchSemanticsNode()
-
-        drag("viewer_elasticity", false)
-        compose.runOnIdle { assertEquals(MotionLimits.MIN_ELASTICITY, viewModel.currentConfig.value.elasticity, .001f) }
-        drag("viewer_elasticity", true)
-        compose.runOnIdle { assertEquals(MotionLimits.MAX_ELASTICITY, viewModel.currentConfig.value.elasticity, .001f) }
-
-        // Switch to Tab 2 (Animations): Zoom exists, Elasticity does not
+        // Switch to Tab 2 (Animations): Zoom & Zoom 3D return
         compose.onNodeWithContentDescription("Animations").performClick()
         compose.onNodeWithTag("viewer_zoom", useUnmergedTree = true).fetchSemanticsNode()
-        compose.onNodeWithTag("viewer_elasticity", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("viewer_zoom_3d", useUnmergedTree = true).fetchSemanticsNode()
     }
 }

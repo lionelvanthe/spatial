@@ -567,7 +567,28 @@
         "2026-11-23: Sửa SpatialSceneConfig.kt (MIN_ZOOM=-1.0f, MAX_ZOOM=1.0f), SpatialModelEngine.cpp (clamp -1..1, hệ số 0.42f, nhịp thở cosine trong updateAnimated), SpatialGLRenderer.kt (bỏ nền tĩnh 45% ở Tab Rotate, mở clamp -1..1), MotionLimitsTest.kt (thêm bundledSceneZoomsArePreservedOnPhotos3DScale) và ZoomExportTest.kt (lấy mẫu frame ở giữa chu kỳ progress=0.5).",
         "2026-11-23: git diff --check PASS. harness.ps1 -Mode Verify PASS (.harness/runs/20261123T134014558Z-312ab2ef/result.json): :app:testDebugUnitTest, :app:lintDebug, CMake C++ 3 ABI, :app:assembleDebug BUILD SUCCESSFUL.",
         "2026-11-23: harness.ps1 -Mode Device PASS trên thiết bị thật JSN-L22 (Android 10) (.harness/runs/20261123T134138478Z-0df02229/result.json): 11/11 connectedDebugAndroidTest PASS (0 failed, 0 errors, 0 skipped), gồm ZoomControlsTest kéo đủ dải [-1, 1] và ZoomExportTest xác minh khung hình MP4 giữa chu kỳ.",
-        "2026-11-23: Trải nghiệm & chụp đối chiếu song song Photos 3D 1.1.6 vs Spatial trên máy thật JSN-L22 với cùng ảnh Portrait Selfie (woman_selfie) ở Zoom 0, +1.0 và -1.0: phát hiện Spatial trước đó không có overscan biên 1.075x nên Zoom âm lộ viền đen & mép lồi lõm theo depth, và biên độ zoomDeltaZ 0.42f phóng mạnh gần gấp đôi Photos 3D (+26.6% vs +15%). Đã bổ sung overscan 1.075x (khớp margin 0.05 của ik0.t/ik0.n) cho SpatialGLRenderer/VideoExporter/GifExporter và chuẩn hóa zoomDeltaZ = 0.26f trong SpatialModelEngine.cpp (+16.2% ở +1.0, -6.5% ở -1.0, luôn phủ kín 100% khung). Verify PASS (.harness/runs/20261123T135624507Z-a92a7871/result.json), Device PASS 11/11 trên JSN-L22 (.harness/runs/20261123T135743338Z-af9a0aaa/result.json). Đã cài lại app-debug.apk theo yêu cầu tự trải nghiệm và chụp xác minh trực quan cả 3 mức Zoom 0/+1.0/-1.0 trên JSN-L22: kín khung 100%, không còn viền đen, tỷ lệ phóng/thu khớp Photos 3D 1.1.6."
+        "2026-11-23: Trải nghiệm & chụp đối chiếu song song Photos 3D 1.1.6 vs Spatial trên máy thật JSN-L22 với cùng ảnh Portrait Selfie (woman_selfie) ở Zoom 0, +1.0 và -1.0: phát hiện Spatial trước đó không có overscan biên 1.075x nên Zoom âm lộ viền đen & mép lồi lõm theo depth, và biên độ zoomDeltaZ 0.42f phóng mạnh gần gấp đôi Photos 3D (+26.6% vs +15%). Đã bổ sung overscan 1.075x (khớp margin 0.05 của ik0.t/ik0.n) cho SpatialGLRenderer/VideoExporter/GifExporter và chuẩn hóa zoomDeltaZ = 0.26f trong SpatialModelEngine.cpp (+16.2% ở +1.0, -6.5% ở -1.0, luôn phủ kín 100% khung). Verify PASS (.harness/runs/20261123T135624507Z-a92a7871/result.json), Device PASS 11/11 trên JSN-L22 (.harness/runs/20261123T135743338Z-af9a0aaa/result.json). Đã cài lại app-debug.apk theo yêu cầu tự trải nghiệm và chụp xác minh trực quan cả 3 mức Zoom 0/+1.0/-1.0 trên JSN-L22: kín khung 100%, không còn viền đen, tỷ lệ phóng/thu khớp Photos 3D 1.1.6.",
+        "2026-11-24: Bổ sung tự động disable (làm mờ) thanh trượt + nhãn/icon Zoom 3D khi |zoom| < 0.1f trong MainScreen.kt (khớp ImageViewActivity/l6.a của Photos 3D 1.1.6) và thêm thinTrack=true; cập nhật ZoomControlsTest.kt kiểm tra assertIsNotEnabled() khi zoom=0f và assertIsEnabled() khi |zoom|>=0.1f. Verify PASS (.harness/runs/20261124T045940791Z-eb84f0e0/result.json), Device PASS 11/11 trên JSN-L22 (.harness/runs/20261124T050216494Z-76a56cb9/result.json)."
+      ]
+    },
+    {
+      "id": "SHAKE-116",
+      "title": "Đồng bộ Tab 2 (Shake / Jelly) cả vật lý lò xo, kéo-thả, gia tốc lắc và UI theo Photos 3D 1.1.6",
+      "status": "done",
+      "depends_on": [
+        "ZOOM-116"
+      ],
+      "acceptance": [
+        "SpatialModelEngine.cpp tái tạo đúng công thức vật lý ImageDynamicModel::reSetupNodes (0x25d04), reSetupSprings (0x25c60) và performUpdateStep (0x25468): mass=20..30, kStab=8.0..9.5, kStruct=3.0..4.5, damping=0.85^h, neo về basePos",
+        "Kéo tay trên Tab 2 dịch trực tiếp đỉnh quanh depthCenter; thả tay lập tức bung lò xo bật nảy thạch; lắc máy dùng gia tốc tuyến tính có dấu (cd - depthCenter) để tiền cảnh & hậu cảnh lắc ngược chiều nhau",
+        "UI bảng chỉnh Tab 2 chỉ hiển thị Cường độ và Trung tâm (ẩn Zoom, Zoom 3D, Độ đàn hồi) khớp ImageViewActivity.O() của Photos 3D 1.1.6",
+        "Chạy Verify (unit tests, lintDebug, assembleDebug) và Device trên JSN-L22 pass"
+      ],
+      "evidence": [
+        "2026-11-24: Đối chiếu libPhotos3DModelManager.so (reSetupNodes 0x25d04, reSetupSprings 0x25c60, performUpdateStep 0x25468, updateDynamicNative 0x289f0) và ảnh chụp trực tiếp Tab 2 của Photos 3D 1.1.6 trên JSN-L22 (p3d_tab2.png).",
+        "2026-11-24: SpatialModelEngine.h/.cpp, jni_bridge.cpp, SpatialModelBridge.kt, SpatialGLRenderer.kt: cập nhật updateShake(dt, dragX, dragY, isTouching) kéo trực tiếp đỉnh khi chạm tay, thả tay bung lò xo tức thì với đúng hằng số mass=20..30, kStab=8.0..9.5, kStruct=3.0..4.5, damping=0.85^h neo về basePos; applyImpulse dùng trọng số có dấu 1.45*internalIntensity*(cd - shakeCenter) để tiền cảnh và hậu cảnh lắc ngược chiều nhau khi lắc máy; bỏ gyro tĩnh và zoomDeltaZ khỏi Tab 2.",
+        "2026-11-24: MainScreen.kt & ZoomControlsTest.kt: bảng chỉnh Tab 2 chỉ hiển thị Cường độ và Trung tâm (ẩn Zoom, Zoom 3D, Độ đàn hồi) khớp ImageViewActivity.O() của Photos 3D 1.1.6.",
+        "2026-11-24: git diff --check PASS. harness.ps1 -Mode Verify PASS (.harness/runs/20261124T051053613Z-9a353683/result.json): testDebugUnitTest, lintDebug, CMake C++ 3 ABI, assembleDebug. harness.ps1 -Mode Device PASS trên JSN-L22 (.harness/runs/20261124T051218898Z-b11a5406/result.json): 11/11 connectedDebugAndroidTest PASS."
       ]
     }
   ]

@@ -100,12 +100,12 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     var gyroY = 0.0f
 
     fun onLinearAcceleration(ax: Float, ay: Float) {
-        if (activeTabMode != 1) return
-        // Filter out micro hand tremor (< 0.6 m/s^2) and feed real shake inertia into the jelly mesh
+        if (activeTabMode != 1 || isTouching) return
+        // Filter out micro hand tremor (< 0.45 m/s^2) and feed real shake inertia into the jelly mesh
         val mag = hypot(ax, ay)
-        if (mag > 0.6f) {
-            pendingImpulseX = (pendingImpulseX - ax * 0.055f).coerceIn(-6.0f, 6.0f)
-            pendingImpulseY = (pendingImpulseY - ay * 0.055f).coerceIn(-6.0f, 6.0f)
+        if (mag > 0.45f) {
+            pendingImpulseX = (pendingImpulseX - ax * 0.14f).coerceIn(-10.0f, 10.0f)
+            pendingImpulseY = (pendingImpulseY - ay * 0.14f).coerceIn(-10.0f, 10.0f)
         }
     }
 
@@ -191,10 +191,13 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
     fun onTouchUp(velocityX: Float, velocityY: Float) {
         isTouching = false
         if (activeTabMode == 1) {
+            // Release drag immediately so spring-mass jelly bounces back freely from displaced vertices
+            touchDragX = 0.0f
+            touchDragY = 0.0f
             val vx = velocityX.coerceIn(-8.0f, 8.0f)
             val vy = (-velocityY).coerceIn(-8.0f, 8.0f)
-            pendingImpulseX += vx * 0.14f
-            pendingImpulseY += vy * 0.14f
+            pendingImpulseX += vx * 0.18f
+            pendingImpulseY += vy * 0.18f
         }
     }
 
@@ -368,10 +371,10 @@ class SpatialGLRenderer(private val context: Context) : GLSurfaceView.Renderer {
                 val impY = pendingImpulseY
                 pendingImpulseX = 0.0f
                 pendingImpulseY = 0.0f
-                if (impX != 0.0f || impY != 0.0f) {
+                if (!isTouching && (impX != 0.0f || impY != 0.0f)) {
                     modelBridge.applyImpulse(impX, impY)
                 }
-                modelBridge.updateShake(dt, smoothTiltX, smoothTiltY)
+                modelBridge.updateShake(dt, touchDragX, touchDragY, isTouching)
                 verticesNeedUpload = true
             }
             2 -> {

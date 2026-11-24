@@ -1019,7 +1019,7 @@ fun ViewerScreen(
     onUpdateSpeed: (Float) -> Unit,
     onUpdateIntensity: (Float) -> Unit,
     onUpdateDepthCenter: (Float) -> Unit,
-    onUpdateElasticity: (Float) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onUpdateElasticity: (Float) -> Unit,
     onUpdateZoom: (Float) -> Unit,
     onUpdateZoom3D: (Float) -> Unit,
     onUpdateInverted: (Boolean) -> Unit,
@@ -1237,8 +1237,9 @@ fun ViewerScreen(
                             )
                         }
 
-                        // Zoom uses the same limits as the saved scene configuration.
-                        if (selectedBottomTab in 0..2) {
+                        // Zoom & Zoom 3D: visible on Tab 0 (Rotate) and Tab 2 (Animations), hidden on Tab 1 (Shake)
+                        // matching Photos 3D 1.1.6 ImageViewActivity.O().
+                        if (selectedBottomTab == 0 || selectedBottomTab == 2) {
                             HorizontalDivider(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1277,7 +1278,8 @@ fun ViewerScreen(
                                     )
                                 }
 
-                                // Zoom 3D (depth-weighted zoom blend: 0.0 .. 1.0, Photos 3D 1.1.6)
+                                // Zoom 3D (depth-weighted zoom blend: 0.0 .. 1.0, Photos 3D 1.1.6: disabled when |zoom| < 0.1)
+                                val zoom3DEnabled = kotlin.math.abs(config.zoom) >= 0.1f
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
@@ -1285,13 +1287,13 @@ fun ViewerScreen(
                                     Icon(
                                         painter = painterResource(id = R.drawable.ic_zoom_prop),
                                         contentDescription = null,
-                                        tint = Color.White,
+                                        tint = if (zoom3DEnabled) Color.White else Color.White.copy(alpha = 0.45f),
                                         modifier = Modifier.size(22.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
                                         text = "Zoom 3D:",
-                                        color = Color.White,
+                                        color = if (zoom3DEnabled) Color.White else Color.White.copy(alpha = 0.45f),
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Medium
                                     )
@@ -1300,6 +1302,8 @@ fun ViewerScreen(
                                         value = config.zoom3D,
                                         onValueChange = onUpdateZoom3D,
                                         valueRange = 0.0f..MotionLimits.MAX_ZOOM_3D,
+                                        enabled = zoom3DEnabled,
+                                        thinTrack = true,
                                         modifier = Modifier.fillMaxWidth().testTag("viewer_zoom_3d")
                                     )
                                 }
@@ -1307,43 +1311,7 @@ fun ViewerScreen(
                             }
                         }
 
-                        // ROW 4: ĐỘ ĐÀN HỒI (Elasticity: 0.0 .. 1.0) - Visible ONLY when Tab 1 (Shake / Jelly) is active
-                        if (selectedBottomTab == 1) {
-                            HorizontalDivider(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 3.dp),
-                                thickness = 0.8.dp,
-                                color = Color.White.copy(alpha = 0.15f)
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_shake_tab),
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "Độ đàn hồi:",
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                CustomSpatialSlider(
-                                    value = config.elasticity,
-                                    onValueChange = onUpdateElasticity,
-                                    valueRange = MotionLimits.MIN_ELASTICITY..MotionLimits.MAX_ELASTICITY,
-                                    modifier = Modifier.fillMaxWidth().testTag("viewer_elasticity")
-                                )
-                            }
-                        }
-
-                        // ROW 5: TỐC ĐỘ (Speed: 0.0 .. 1.0) - Visible ONLY when Animations Tab (Tab 2) is active
+                        // ROW 4: TỐC ĐỘ (Speed: 0.0 .. 1.0) - Visible ONLY when Animations Tab (Tab 2) is active
                         if (selectedBottomTab == 2) {
                             HorizontalDivider(
                                 modifier = Modifier

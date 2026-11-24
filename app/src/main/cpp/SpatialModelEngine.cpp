@@ -236,14 +236,18 @@ void SpatialModelEngine::applyImpulse(float impulseX, float impulseY) {
     const float ix = std::clamp(safeFinite(impulseX, 0.0f), -12.0f, 12.0f);
     const float iy = std::clamp(safeFinite(impulseY, 0.0f), -12.0f, 12.0f);
     const float internalIntensity = computeInternalIntensity(intensity_);
+    // Match Photos 3D 1.1.6 sk0.p (1 - depthCenter in shake mode) & reSetupNodes (0x25d78):
+    // signed accelWeight = 1.45f * internalIntensity * (cd - shakeCenter) makes foreground and
+    // background jiggle in opposite directions around the focal depth plane.
+    const float shakeCenter = 1.0f - depthCenter_;
     const size_t n = mesh_.vertices.size();
     for (size_t i = 0; i < n; ++i) {
         const MeshVertex& mv = mesh_.vertices[i];
         if (mv.isBorder) continue;
-        // Weight impulse by depth relative to background so foreground subject jiggles vividly
-        const float depthWeight = (0.35f + 0.95f * nodes_[i].curvedDepth) * internalIntensity * mv.edgeWeight;
-        nodes_[i].velX += ix * depthWeight;
-        nodes_[i].velY += iy * depthWeight;
+        const float signedDepth = internalIntensity * (nodes_[i].curvedDepth - shakeCenter);
+        const float accelWeight = signedDepth * 1.45f * mv.edgeWeight * 0.045f;
+        nodes_[i].velX += ix * accelWeight;
+        nodes_[i].velY += iy * accelWeight;
     }
 }
 
@@ -259,112 +263,129 @@ void SpatialModelEngine::resetPhysics() {
     }
 }
 
-void SpatialModelEngine::updateShake(float* outVertices, float dt, float tiltX, float tiltY) {
+void SpatialModelEngine::updateShake(float* outVertices, float dt, float dragX, float dragY, bool isTouching) {
     if (!outVertices) return;
     updateCurvedDepths();
 
-    float clampedDt = std::clamp(safeFinite(dt, 0.016f), 0.0005f, 0.04f);
-    int subSteps = std::clamp(static_cast<int>(std::ceil(clampedDt / 0.008f)), 1, 4);
-    float subDt = clampedDt / static_cast<float>(subSteps);
-
-    const float maxShift = 0.112f * computeInternalIntensity(intensity_);
-    const float sx = std::clamp(safeFinite(tiltX, 0.0f), -1.0f, 1.0f);
-    const float sy = std::clamp(safeFinite(tiltY, 0.0f), -1.0f, 1.0f);
-
-    // Elasticity [0..1]: higher elasticity -> bouncier (lower damping, lively spring)
-    const float kStab = 90.0f - 42.0f * elasticity_;   // 90 -> 48
-    const float cDamp = 6.0f - 4.0f * elasticity_;     // 6.0 -> 2.0
-    const float kStruct = 32.0f + 28.0f * elasticity_; // neighbor coupling
-
+    const float internalIntensity = computeInternalIntensity(intensity_);
+    const float shakeCenter = 1.0f - depthCenter_;
     const size_t n = mesh_.vertices.size();
-    for (size_t i = 0; i < n; ++i) {
-        const MeshVertex& mv = mesh_.vertices[i];
-        float s0 = nodes_[i].curvedDepth - depthCenter_;
-        nodes_[i].anchorX = mv.baseX + sx * s0 * maxShift * mv.edgeWeight;
-        nodes_[i].anchorY = mv.baseY + sy * s0 * maxShift * mv.edgeWeight;
+
+    if (isTouching) {
+        // Match Photos 3D 1.1.6 updateDynamicNative (0x28a2c..0x28a58):
+        // while touching, shift vertices directly with finger drag so releasing springs them back like jelly.
+        const float sx = std::clamp(safeFinite(dragX, 0.0f), -1.0f, 1.0f);
+        const float sy = std::clamp(safeFinite(dragY, 0.0f), -1.0f, 1.0f);
+        const float maxShift = 0.088f * internalIntensity;
+        for (size_t i = 0; i < n; ++i) {
+            const MeshVertex& mv = mesh_.vertices[i];
+            const float cd = nodes_[i].curvedDepth;
+            const float s0 = cd - shakeCenter;
+            const float px = mv.baseX + sx * s0 * maxShift * mv.edgeWeight;
+            const float py = mv.baseY + sy * s0 * maxShift * mv.edgeWeight;
+            nodes_[i].posX = px;
+            nodes_[i].posY = py;
+            nodes_[i].velX = 0.0f;
+            nodes_[i].velY = 0.0f;
+
+            const size_t baseIdx = i * 5;
+            outVertices[baseIdx + 0] = px;
+            outVertices[baseIdx + 1] = py;
+            outVertices[baseIdx + 2] = cd * 0.048f;
+            outVertices[baseIdx + 3] = mv.u;
+            outVertices[baseIdx + 4] = mv.v;
+        }
+        hasLastParallax_ = false;
+        return;
     }
+
+    // Exact Photos 3D 1.1.6 ImageDynamicModel::performUpdateStep (0x25468) + reSetupNodes (0x25d04):
+    // 1 native physics tick = 1/30s with mass = 20 + 10*|sd|, kStab = 8 + 1.5*(1 - |sd|),
+    // kStruct = 3 + 1.5*(1 - |cdA - cdB|), and per-tick damping 0.85^h anchored at basePos.
+    const float clampedDt = std::clamp(safeFinite(dt, 0.016f), 0.0005f, 0.04f);
+    const int subSteps = std::clamp(static_cast<int>(std::ceil(clampedDt / 0.0167f)), 1, 3);
+    const float h = (clampedDt * 30.0f) / static_cast<float>(subSteps);
+    const float dampFactor = std::pow(0.85f, h);
 
     for (int step = 0; step < subSteps; ++step) {
         for (size_t i = 0; i < n; ++i) {
             PhysicsNode& node = nodes_[i];
-            if (mesh_.vertices[i].isBorder) {
+            const MeshVertex& mv = mesh_.vertices[i];
+            if (mv.isBorder) {
                 node.forceX = 0.0f;
                 node.forceY = 0.0f;
                 continue;
             }
-            // Stabilizer spring pulling toward equilibrium anchor
-            node.forceX = -kStab * (node.posX - node.anchorX) - cDamp * node.velX;
-            node.forceY = -kStab * (node.posY - node.anchorY) - cDamp * node.velY;
+            const float absDepth = std::min(std::fabs(internalIntensity * (node.curvedDepth - shakeCenter)), 1.0f);
+            const float kStab = 8.0f + (1.0f - absDepth) * 1.5f;
+            node.forceX = kStab * (mv.baseX - node.posX);
+            node.forceY = kStab * (mv.baseY - node.posY);
         }
 
-        // Structural springs propagate jelly ripples across adjacent triangles
         for (const SpringEdge& e : springs_) {
             PhysicsNode& na = nodes_[e.a];
             PhysicsNode& nb = nodes_[e.b];
-            float dispAx = na.posX - na.anchorX;
-            float dispAy = na.posY - na.anchorY;
-            float dispBx = nb.posX - nb.anchorX;
-            float dispBy = nb.posY - nb.anchorY;
+            const MeshVertex& mva = mesh_.vertices[e.a];
+            const MeshVertex& mvb = mesh_.vertices[e.b];
+            const float dispAx = na.posX - mva.baseX;
+            const float dispAy = na.posY - mva.baseY;
+            const float dispBx = nb.posX - mvb.baseX;
+            const float dispBy = nb.posY - mvb.baseY;
 
-            float fx = kStruct * e.stiffnessWeight * (dispBx - dispAx);
-            float fy = kStruct * e.stiffnessWeight * (dispBy - dispAy);
+            const float kStruct = 3.0f + (1.0f - std::fabs(na.curvedDepth - nb.curvedDepth)) * 1.5f;
+            const float fx = kStruct * (dispBx - dispAx);
+            const float fy = kStruct * (dispBy - dispAy);
 
-            if (!mesh_.vertices[e.a].isBorder) {
+            if (!mva.isBorder) {
                 na.forceX += fx;
                 na.forceY += fy;
             }
-            if (!mesh_.vertices[e.b].isBorder) {
+            if (!mvb.isBorder) {
                 nb.forceX -= fx;
                 nb.forceY -= fy;
             }
         }
 
         for (size_t i = 0; i < n; ++i) {
-            if (mesh_.vertices[i].isBorder) {
-                nodes_[i].posX = mesh_.vertices[i].baseX;
-                nodes_[i].posY = mesh_.vertices[i].baseY;
+            const MeshVertex& mv = mesh_.vertices[i];
+            if (mv.isBorder) {
+                nodes_[i].posX = mv.baseX;
+                nodes_[i].posY = mv.baseY;
                 nodes_[i].velX = 0.0f;
                 nodes_[i].velY = 0.0f;
                 continue;
             }
             PhysicsNode& node = nodes_[i];
-            node.velX += node.forceX * subDt;
-            node.velY += node.forceY * subDt;
-            node.posX += node.velX * subDt;
-            node.posY += node.velY * subDt;
+            const float absDepth = std::fabs(internalIntensity * (node.curvedDepth - shakeCenter));
+            const float mass = 20.0f + absDepth * 10.0f;
+
+            node.velX += (node.forceX / mass) * h;
+            node.velY += (node.forceY / mass) * h;
+            node.posX += node.velX * h;
+            node.posY += node.velY * h;
+            node.velX *= dampFactor;
+            node.velY *= dampFactor;
 
             // Safety clamp against extreme numerical spikes
-            float dx = node.posX - node.anchorX;
-            float dy = node.posY - node.anchorY;
-            float maxOffset = 0.22f;
+            const float dx = node.posX - mv.baseX;
+            const float dy = node.posY - mv.baseY;
+            constexpr float maxOffset = 0.16f;
             if (dx * dx + dy * dy > maxOffset * maxOffset) {
-                float invLen = maxOffset / std::sqrt(dx * dx + dy * dy);
-                node.posX = node.anchorX + dx * invLen;
-                node.posY = node.anchorY + dy * invLen;
+                const float invLen = maxOffset / std::sqrt(dx * dx + dy * dy);
+                node.posX = mv.baseX + dx * invLen;
+                node.posY = mv.baseY + dy * invLen;
                 node.velX *= 0.5f;
                 node.velY *= 0.5f;
             }
         }
     }
 
-    const float effZoom = (zoom_ < 0.0f) ? (zoom_ * 0.5f) : zoom_;
-    const float z3d = zoom3D_;
-    const float flatZoomTerm = effZoom * (1.0f - z3d);
-    const float depthZoomWeight = effZoom * z3d;
-
     for (size_t i = 0; i < n; ++i) {
         const MeshVertex& mv = mesh_.vertices[i];
-        const float cd = nodes_[i].curvedDepth;
-        const float depthTerm = (effZoom > 0.0f) ? cd : (1.0f - cd);
-        const float zoomDeltaZ = (flatZoomTerm + depthZoomWeight * depthTerm) * 0.26f;
-        const float dispX = nodes_[i].posX - nodes_[i].anchorX;
-        const float dispY = nodes_[i].posY - nodes_[i].anchorY;
-        const float zBounce = std::sqrt(dispX * dispX + dispY * dispY) * 0.20f * cd;
-
         const size_t baseIdx = i * 5;
         outVertices[baseIdx + 0] = nodes_[i].posX;
         outVertices[baseIdx + 1] = nodes_[i].posY;
-        outVertices[baseIdx + 2] = cd * 0.048f + zoomDeltaZ + zBounce;
+        outVertices[baseIdx + 2] = nodes_[i].curvedDepth * 0.048f;
         outVertices[baseIdx + 3] = mv.u;
         outVertices[baseIdx + 4] = mv.v;
     }
